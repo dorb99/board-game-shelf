@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -19,6 +20,8 @@ class Settings(BaseSettings):
     # Reasoning models only; leave blank for a model that does not take this setting.
     openai_reasoning_effort: str = "low"
     data_dir: Path = BACKEND_DIR / "data"
+    # A Postgres connection string; blank keeps the library in a SQLite file in the data directory.
+    database_url: str = ""
     frontend_dist: Path = BACKEND_DIR.parent / "frontend" / "dist"
 
     @field_validator("data_dir", "frontend_dist")
@@ -33,13 +36,16 @@ class Settings(BaseSettings):
         return self.data_dir / "boardgames_ranks.csv"
 
     @property
-    def covers_dir(self) -> Path:
-        return self.data_dir / "covers"
+    def engine_url(self) -> str:
+        if not self.database_url:
+            return sqlite_url(self.data_dir)
+        # Hosts hand out postgres:// or postgresql://; name the driver that is installed.
+        return re.sub(r"^postgres(ql)?://", "postgresql+psycopg://", self.database_url)
 
-    @property
-    def database_url(self) -> str:
-        return f"sqlite:///{(self.data_dir / 'library.db').as_posix()}"
+
+def sqlite_url(data_dir: Path) -> str:
+    return f"sqlite:///{(data_dir / 'library.db').as_posix()}"
 
 
 settings = Settings()
-settings.covers_dir.mkdir(parents=True, exist_ok=True)
+settings.data_dir.mkdir(parents=True, exist_ok=True)

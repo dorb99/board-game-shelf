@@ -3,16 +3,12 @@ services:
   - type: web
     name: board-game-shelf
     runtime: docker
-    # A persistent disk needs a paid plan; on the free plan the library is wiped on every restart.
-    plan: starter
-    # One instance only: the database is a SQLite file on the disk.
-    numInstances: 1
+    plan: free
     healthCheckPath: /api/owners
-    disk:
-      name: library-data
-      mountPath: /data
-      sizeGB: 1
     envVars:
+      # The free plan has no disk, so the library lives in an outside Postgres database.
+      - key: DATABASE_URL
+        sync: false
       - key: LLM_PROVIDER
         value: gemini
       - key: GEMINI_API_KEY

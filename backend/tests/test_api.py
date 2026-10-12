@@ -19,7 +19,7 @@ def test_owner_create_and_duplicate(client):
 def test_adding_game_creates_owner_once(client):
     first = add_game(client)
     assert first.status_code == 201
-    assert first.json()["image_url"] == "/media/covers/cover.jpg"
+    assert first.json()["image_url"].startswith("/media/covers/")
     second = add_game(client, name="Azul", owner_name="DOR")
     assert second.json()["owner_id"] == first.json()["owner_id"]
     assert len(client.get("/api/owners").json()) == 1
@@ -49,6 +49,14 @@ def test_bad_image_rejected_and_nothing_saved(client):
     assert response.status_code == 422
     assert client.get("/api/games").json() == []
     assert client.get("/api/owners").json() == []
+
+
+def test_cover_is_served_until_the_game_is_deleted(client):
+    game = add_game(client).json()
+    cover = client.get(game["image_url"])
+    assert (cover.status_code, cover.headers["content-type"]) == (200, "image/jpeg")
+    assert client.delete(f"/api/games/{game['id']}").status_code == 204
+    assert client.get(game["image_url"]).status_code == 404
 
 
 def test_game_without_image(client):

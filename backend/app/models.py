@@ -10,6 +10,13 @@ class Owner(SQLModel, table=True):
     name: str = Field(index=True, unique=True)
 
 
+class Cover(SQLModel, table=True):
+    """A cover image, kept in the database so it survives on hosts without a disk."""
+
+    name: str = Field(primary_key=True)  # random file name; the extension gives the format
+    data: bytes
+
+
 class Game(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True)
@@ -19,7 +26,7 @@ class Game(SQLModel, table=True):
     min_players: int | None = None
     max_players: int | None = None
     playing_time: int | None = None  # minutes
-    image_path: str | None = None  # file name inside the covers directory
+    image_path: str | None = None  # name of its Cover row
     # Which horizontal strip of the cover shows on the shelf: 0 = top, 100 = bottom.
     spine_position: int | None = None
     spine_label: bool = True  # print the name over the strip

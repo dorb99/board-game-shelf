@@ -66,7 +66,7 @@ async def create_game(data: GameCreate, session: Session = Depends(get_session))
     image_path = None
     if data.image_url:
         try:
-            image_path = await images.save_cover(data.image_url)
+            image_path = await images.save_cover(session, data.image_url)
         except images.ImageError as exc:
             raise HTTPException(422, str(exc)) from exc
 
@@ -110,7 +110,6 @@ def update_game(
 @router.delete("/{game_id}", status_code=204)
 def delete_game(game_id: int, session: Session = Depends(get_session)) -> None:
     game = get_game_or_404(session, game_id)
-    image_path = game.image_path
+    images.delete_cover(session, game.image_path)
     session.delete(game)
     session.commit()
-    images.delete_cover(image_path)

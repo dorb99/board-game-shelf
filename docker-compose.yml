@@ -8,11 +8,25 @@ services:
       - path: backend/.env
         required: false
     environment:
-      # Wins over a DATA_DIR in backend/.env, which points at a Windows path.
+      # These win over backend/.env, so a local run never touches the live database.
       DATA_DIR: /data
+      DATABASE_URL: postgresql://library:library@db/library
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: library
+      POSTGRES_PASSWORD: library
+      POSTGRES_DB: library
     volumes:
-      # The SQLite database, cover images and game catalog live here.
-      - library-data:/data
+      - library-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U library"]
+      interval: 2s
+      retries: 15
 
 volumes:
-  library-data:
+  library-db:

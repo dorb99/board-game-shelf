@@ -6,10 +6,13 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
-from ..config import settings
+from sqlmodel import Session
+
+from ..models import Cover
 
 MAX_BYTES = 10 * 1024 * 1024
 MAX_REDIRECTS = 5
+MEDIA_TYPES = {".jpg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp"}
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; BoardGamesLibrary/1.0)"}
 
 
@@ -77,14 +80,15 @@ async def is_image_url(url: str) -> bool:
     return True
 
 
-async def save_cover(url: str) -> str:
-    """Download a cover into the covers directory and return its file name."""
+async def save_cover(session: Session, url: str) -> str:
+    """Download a cover, add it to the session and return its name."""
     data, extension = await fetch_image(url)
-    file_name = f"{uuid.uuid4().hex}{extension}"
-    (settings.covers_dir / file_name).write_bytes(data)
-    return file_name
+    name = f"{uuid.uuid4().hex}{extension}"
+    session.add(Cover(name=name, data=data))
+    return name
 
 
-def delete_cover(file_name: str | None) -> None:
-    if file_name:
-        (settings.covers_dir / file_name).unlink(missing_ok=True)
+def delete_cover(session: Session, name: str | None) -> None:
+    cover = session.get(Cover, name) if name else None
+    if cover:
+        session.delete(cover)
