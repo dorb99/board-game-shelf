@@ -9,7 +9,6 @@ services:
         required: false
     environment:
       # These win over backend/.env, so a local run never touches the live database.
-      DATA_DIR: /data
       DATABASE_URL: postgresql://library:library@db/library
     depends_on:
       db:

@@ -29,8 +29,8 @@ Settings in `backend/.env`:
 | `GEMINI_MODEL` | Optional. Defaults to `gemini-flash-latest` |
 | `OPENAI_API_KEY` | Used when the provider is `openai`. Get one at https://platform.openai.com/api-keys |
 | `OPENAI_MODEL` | Optional. Defaults to `gpt-5-mini`; any model that supports the web search tool |
-| `DATABASE_URL` | Optional. A Postgres connection string. Blank keeps the library in a SQLite file in the data directory |
-| `DATA_DIR` | Optional. Where the SQLite database and game catalog live. Defaults to `backend/data`; a relative path is taken from the project root |
+| `DATABASE_URL` | Postgres connection string for the library: owners, games and cover images. A free database from https://neon.tech works |
+| `DATA_DIR` | Optional. Where the game catalog file lives. Defaults to `backend/data`; a relative path is taken from the project root |
 
 ### Game catalog
 
@@ -87,30 +87,17 @@ docker compose up --build
 The app is at http://localhost:8080 (set `APP_PORT` for another port). API keys are read
 from `backend/.env`.
 
-### Render free plan
+### Render
 
-The free plan has no persistent disk, so the library lives in an outside Postgres database.
+The library lives in an outside Postgres database, so the free plan (which has no
+persistent disk) is enough.
 
-1. Create a free Postgres database, for example at https://neon.tech, and copy its connection string.
+1. Create a Postgres database, for example a free one at https://neon.tech, and copy its connection string.
 2. On Render, choose New > Blueprint and pick this repository; `render.yaml` sets up the
    service and asks for `DATABASE_URL` and the API keys. For a service created by hand,
    leave Root Directory blank and add the same environment variables.
-3. To bring over a library you already have locally, run this once:
-
-   ```powershell
-   cd backend
-   $env:DATABASE_URL = "postgresql://..."   # the connection string from step 1
-   .venv\Scripts\python -m app.import_library
-   ```
-
-   It copies the owners, games and covers from `backend/data` into the empty database.
 
 The game catalog is a file, so it is not available there and every search goes to the AI provider.
-
-### A host with a persistent disk
-
-Leave `DATABASE_URL` unset and mount the disk at `/data`: the library is then a SQLite
-file on it, and `boardgames_ranks.csv` can be uploaded next to it. Run a single instance.
 
 Anyone with the URL can add, edit and remove games. The lookup and rules-assistant
 endpoints are rate limited per IP address to protect the API quota.

@@ -3,7 +3,10 @@ import tempfile
 
 # Must be set before the app is imported: settings are read at import time.
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="boardgames-test-")
-os.environ["DATABASE_URL"] = ""
+# A throwaway database, so the tests can never reach the real library.
+os.environ["DATABASE_URL"] = (
+    f"sqlite:///{os.environ['DATA_DIR']}/test.db?check_same_thread=false".replace("\\", "/")
+)
 os.environ["LLM_PROVIDER"] = "gemini"
 os.environ["GEMINI_API_KEY"] = ""
 os.environ["OPENAI_API_KEY"] = ""

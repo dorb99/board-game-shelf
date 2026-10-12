@@ -3,7 +3,7 @@ uvicorn[standard]
 sqlmodel
 pydantic-settings
 httpx
-psycopg[binary]
+pg8000
 google-genai
 openai
 pytest
