@@ -90,13 +90,16 @@ export function AddGameDialog({ owners, onClose }: Props) {
 }
 
 function CandidateRow({ candidate, onSelect }: { candidate: Candidate; onSelect: () => void }) {
-  const facts = [candidate.year, playersLabel(candidate), timeLabel(candidate)].filter(Boolean)
+  const facts = [
+    candidate.year,
+    candidate.is_expansion && 'Expansion',
+    playersLabel(candidate),
+    timeLabel(candidate),
+  ].filter(Boolean)
   return (
     <button className="candidate" onClick={onSelect}>
-      {candidate.thumbnail_url ? (
+      {candidate.thumbnail_url && (
         <img src={candidate.thumbnail_url} alt="" referrerPolicy="no-referrer" />
-      ) : (
-        <span className="no-thumbnail">No image</span>
       )}
       <span className="candidate-text">
         <strong>{candidate.name}</strong>

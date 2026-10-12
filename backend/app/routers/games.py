@@ -93,9 +93,11 @@ def update_game(
         session.flush()
         game.owner_id = owner.id
 
-    for key in DETAIL_FIELDS:
+    for key in (*DETAIL_FIELDS, "spine_position"):
         if key in changes:
             setattr(game, key, changes[key])
+    if changes.get("spine_label") is not None:
+        game.spine_label = changes["spine_label"]
     if game.min_players and game.max_players and game.min_players > game.max_players:
         raise HTTPException(422, "Minimum players cannot exceed maximum players.")
 

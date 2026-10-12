@@ -19,13 +19,16 @@ class Game(SQLModel, table=True):
     min_players: int | None = None
     max_players: int | None = None
     playing_time: int | None = None  # minutes
-    description: str | None = None
     image_path: str | None = None  # file name inside the covers directory
+    # Which horizontal strip of the cover shows on the shelf: 0 = top, 100 = bottom.
+    spine_position: int | None = None
+    spine_label: bool = True  # print the name over the strip
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 Players = PydanticField(default=None, ge=1, le=999)
 Minutes = PydanticField(default=None, ge=1, le=100_000)
+SpinePosition = PydanticField(default=None, ge=0, le=100)
 OwnerName = PydanticField(min_length=1, max_length=60)
 
 
@@ -42,8 +45,9 @@ class GameRead(BaseModel):
     min_players: int | None
     max_players: int | None
     playing_time: int | None
-    description: str | None
     image_url: str | None
+    spine_position: int | None
+    spine_label: bool
 
     @classmethod
     def from_game(cls, game: Game) -> "GameRead":
@@ -62,8 +66,9 @@ class GameCreate(BaseModel):
     min_players: int | None = Players
     max_players: int | None = Players
     playing_time: int | None = Minutes
-    description: str | None = PydanticField(default=None, max_length=5000)
     image_url: str | None = PydanticField(default=None, max_length=2000)
+    spine_position: int | None = SpinePosition
+    spine_label: bool = True
 
 
 class GameUpdate(BaseModel):
@@ -72,10 +77,12 @@ class GameUpdate(BaseModel):
     min_players: int | None = Players
     max_players: int | None = Players
     playing_time: int | None = Minutes
+    spine_position: int | None = SpinePosition
+    spine_label: bool | None = None
 
 
 class Candidate(BaseModel):
-    source: Literal["catalog", "gemini"]
+    source: Literal["catalog", "web"]
     bgg_id: int | None = None
     name: str
     year: int | None = None
@@ -83,19 +90,18 @@ class Candidate(BaseModel):
     min_players: int | None = None
     max_players: int | None = None
     playing_time: int | None = None
-    description: str | None = None
     thumbnail_url: str | None = None
     image_url: str | None = None
 
 
 class FoundDetails(BaseModel):
-    """What Gemini found online for one game; unknown values are null."""
+    """What the LLM found online for one game; unknown values are null."""
 
     min_players: int | None = None
     max_players: int | None = None
     playing_time: int | None = None
-    description: str | None = None
     image_url: str | None = None
+    searched: bool = True  # False when web search was refused and the LLM answered from memory
 
 
 class LookupResult(BaseModel):

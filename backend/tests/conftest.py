@@ -3,7 +3,9 @@ import tempfile
 
 # Must be set before the app is imported: settings are read at import time.
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="boardgames-test-")
+os.environ["LLM_PROVIDER"] = "gemini"
 os.environ["GEMINI_API_KEY"] = ""
+os.environ["OPENAI_API_KEY"] = ""
 
 import pytest
 from fastapi.testclient import TestClient

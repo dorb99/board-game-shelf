@@ -70,6 +70,36 @@ def test_update_details_and_owner(client):
     assert cleared.json()["playing_time"] is None
 
 
+def test_spine_slice_defaults_and_updates(client):
+    game = add_game(client).json()
+    assert (game["spine_position"], game["spine_label"]) == (None, True)
+
+    chosen = add_game(client, name="Azul", spine_position=20, spine_label=False).json()
+    assert (chosen["spine_position"], chosen["spine_label"]) == (20, False)
+
+    url = f"/api/games/{game['id']}"
+    updated = client.patch(url, json={"spine_position": 80, "spine_label": False}).json()
+    assert (updated["spine_position"], updated["spine_label"]) == (80, False)
+    # Other edits leave the slice alone
+    untouched = client.patch(url, json={"playing_time": 30}).json()
+    assert (untouched["spine_position"], untouched["spine_label"]) == (80, False)
+    assert client.patch(url, json={"spine_position": 101}).status_code == 422
+
+
+def test_existing_database_gets_new_columns(client):
+    from sqlalchemy import inspect, text
+
+    from app.db import create_tables, engine
+
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE game DROP COLUMN spine_position"))
+        connection.execute(text("ALTER TABLE game DROP COLUMN spine_label"))
+    create_tables()
+    columns = {column["name"] for column in inspect(engine).get_columns("game")}
+    assert {"spine_position", "spine_label"} <= columns
+    assert add_game(client).json()["spine_label"] is True
+
+
 def test_update_rejects_inverted_player_range(client):
     game = add_game(client).json()
     response = client.patch(f"/api/games/{game['id']}", json={"min_players": 6})
@@ -96,39 +126,40 @@ def test_lookup_without_catalog_or_key_reports_warnings(client):
     assert len(body["warnings"]) == 2
 
 
-def test_lookup_uses_catalog_before_gemini(client, monkeypatch):
+def test_lookup_uses_catalog_before_llm(client, monkeypatch):
     from app.models import Candidate
-    from app.services import catalog, gemini
+    from app.services import catalog, llm
 
     async def must_not_run(query):
-        raise AssertionError("Gemini must not be asked when the catalog has a match")
+        raise AssertionError("The LLM must not be asked when the catalog has a match")
 
     found = [Candidate(source="catalog", bgg_id=13, name="CATAN", year=1995)]
     monkeypatch.setattr(catalog, "is_available", lambda: True)
     monkeypatch.setattr(catalog, "search", lambda query: found if query == "catan" else [])
-    monkeypatch.setattr(gemini, "is_configured", lambda: True)
-    monkeypatch.setattr(gemini, "lookup_candidates", must_not_run)
+    monkeypatch.setattr(llm, "is_configured", lambda: True)
+    monkeypatch.setattr(llm, "lookup_candidates", must_not_run)
     body = client.get("/api/lookup", params={"q": " catan "}).json()
     assert [c["bgg_id"] for c in body["candidates"]] == [13]
     assert body["warnings"] == []
 
 
-def test_lookup_falls_back_to_gemini_when_not_in_catalog(client, monkeypatch):
+def test_lookup_falls_back_to_llm_when_not_in_catalog(client, monkeypatch):
     from app.models import Candidate
-    from app.services import catalog, gemini
+    from app.services import catalog, llm
 
     async def fake_lookup(query):
-        return [Candidate(source="gemini", name="Brand New Game")]
+        return [Candidate(source="web", name="Brand New Game")], False
 
     monkeypatch.setattr(catalog, "is_available", lambda: True)
     monkeypatch.setattr(catalog, "search", lambda query: [])
-    monkeypatch.setattr(gemini, "is_configured", lambda: True)
-    monkeypatch.setattr(gemini, "lookup_candidates", fake_lookup)
+    monkeypatch.setattr(llm, "is_configured", lambda: True)
+    monkeypatch.setattr(llm, "lookup_candidates", fake_lookup)
     body = client.get("/api/lookup", params={"q": "brand new game"}).json()
-    assert [c["source"] for c in body["candidates"]] == ["gemini"]
+    assert [c["source"] for c in body["candidates"]] == ["web"]
+    assert body["warnings"] == [llm.not_searched_message()]  # search was refused, so say so
 
 
-def test_chat_requires_gemini_key(client):
+def test_chat_requires_llm_key(client):
     game = add_game(client).json()
     response = client.post(
         f"/api/games/{game['id']}/chat",
@@ -137,39 +168,39 @@ def test_chat_requires_gemini_key(client):
     assert response.status_code == 503
 
 
-def test_details_lookup_requires_gemini_key(client):
+def test_details_lookup_requires_llm_key(client):
     assert client.get("/api/lookup/details", params={"name": "Catan"}).status_code == 503
 
 
-def test_details_lookup_uses_gemini(client, monkeypatch):
+def test_details_lookup_uses_llm(client, monkeypatch):
     from app.models import FoundDetails
-    from app.services import gemini
+    from app.services import llm
 
     async def fake_fetch_details(name, year, bgg_id):
         assert (name, year, bgg_id) == ("Catan", 1995, 13)
         return FoundDetails(min_players=3, max_players=4, image_url="https://example.com/c.jpg")
 
-    monkeypatch.setattr(gemini, "is_configured", lambda: True)
-    monkeypatch.setattr(gemini, "fetch_details", fake_fetch_details)
+    monkeypatch.setattr(llm, "is_configured", lambda: True)
+    monkeypatch.setattr(llm, "fetch_details", fake_fetch_details)
     params = {"name": " Catan ", "year": 1995, "bgg_id": 13}
     body = client.get("/api/lookup/details", params=params).json()
     assert body == {
         "min_players": 3,
         "max_players": 4,
         "playing_time": None,
-        "description": None,
         "image_url": "https://example.com/c.jpg",
+        "searched": True,
     }
 
 
 def test_create_saves_exactly_what_was_reviewed(client, monkeypatch):
-    from app.services import gemini
+    from app.services import llm
 
     async def must_not_run(name, year, bgg_id):
         raise AssertionError("create must not look details up on its own")
 
-    monkeypatch.setattr(gemini, "is_configured", lambda: True)
-    monkeypatch.setattr(gemini, "fetch_details", must_not_run)
-    game = add_game(client, playing_time=None, description="Reviewed text").json()
+    monkeypatch.setattr(llm, "is_configured", lambda: True)
+    monkeypatch.setattr(llm, "fetch_details", must_not_run)
+    game = add_game(client, playing_time=None).json()
     assert game["playing_time"] is None
-    assert game["description"] == "Reviewed text"
+    assert "description" not in game

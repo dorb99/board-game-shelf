@@ -9,7 +9,7 @@ from sqlmodel import Session
 from ..db import get_session
 from ..models import ChatRequest, Game
 from ..ratelimit import RateLimiter
-from ..services import gemini
+from ..services import llm
 from .games import get_game_or_404
 
 logger = logging.getLogger(__name__)
@@ -23,11 +23,12 @@ def _event(payload: dict) -> str:
 
 async def _stream(game: Game, request: ChatRequest) -> AsyncIterator[str]:
     try:
-        async for event in gemini.stream_rules_answer(game, request.messages):
+        async for event in llm.stream_rules_answer(game, request.messages):
             yield _event(event)
-    except Exception:
+    except Exception as exc:
         logger.exception("Rules chat failed for game %s", game.id)
-        yield _event({"type": "error", "message": "The rules assistant hit an error."})
+        message = llm.error_message(exc, "The rules assistant hit an error.")
+        yield _event({"type": "error", "message": message})
     yield _event({"type": "done"})
 
 
@@ -39,8 +40,8 @@ async def chat(
     game = get_game_or_404(session, game_id)
     if request.messages[-1].role != "user":
         raise HTTPException(422, "The last message must be from the user.")
-    if not gemini.is_configured():
-        raise HTTPException(503, "Gemini API key is not configured on the server.")
+    if not llm.is_configured():
+        raise HTTPException(503, llm.not_configured_message())
     return StreamingResponse(
         _stream(game, request),
         media_type="text/event-stream",

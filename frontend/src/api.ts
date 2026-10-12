@@ -15,18 +15,27 @@ export interface Game extends GameDetails {
   owner_id: number
   bgg_id: number | null
   year: number | null
-  description: string | null
   image_url: string | null
+  /** Which strip of the cover shows on the shelf: 0 = top, 100 = bottom, null = middle. */
+  spine_position: number | null
+  spine_label: boolean
 }
 
 export interface Candidate extends GameDetails {
-  source: 'bgg' | 'gemini'
+  source: 'catalog' | 'web'
   bgg_id: number | null
   name: string
   year: number | null
-  description: string | null
+  is_expansion: boolean
   thumbnail_url: string | null
   image_url: string | null
+}
+
+/** What the AI found online for one game; unknown values are null. */
+export interface FoundDetails extends GameDetails {
+  image_url: string | null
+  /** False when web search was refused and the AI answered from memory. */
+  searched: boolean
 }
 
 export interface LookupResult {
@@ -42,11 +51,18 @@ export type NewGame = OwnerRef &
     name: string
     bgg_id?: number | null
     year?: number | null
-    description?: string | null
     image_url?: string | null
+    spine_position?: number | null
+    spine_label?: boolean
   }
 
-export type GameChanges = Partial<GameDetails> & Partial<{ owner_id: number; owner_name: string }>
+export type GameChanges = Partial<GameDetails> &
+  Partial<{
+    owner_id: number
+    owner_name: string
+    spine_position: number | null
+    spine_label: boolean
+  }>
 
 export interface Source {
   uri: string
@@ -61,6 +77,7 @@ export interface ChatMessage {
 export type ChatEvent =
   | { type: 'text'; text: string }
   | { type: 'sources'; sources: Source[] }
+  | { type: 'notice'; message: string }
   | { type: 'error'; message: string }
   | { type: 'done' }
 
@@ -89,10 +106,12 @@ export const api = {
   games: () => request<Game[]>('/api/games'),
   lookup: (query: string) =>
     request<LookupResult>(`/api/lookup?q=${encodeURIComponent(query)}`),
-  lookupDetails: (name: string, year: number | null) =>
-    request<GameDetails>(
-      `/api/lookup/details?name=${encodeURIComponent(name)}${year ? `&year=${year}` : ''}`,
-    ),
+  lookupDetails: (name: string, year: number | null, bggId: number | null) => {
+    const params = new URLSearchParams({ name })
+    if (year) params.set('year', String(year))
+    if (bggId) params.set('bgg_id', String(bggId))
+    return request<FoundDetails>(`/api/lookup/details?${params}`)
+  },
   addGame: (game: NewGame) =>
     request<Game>('/api/games', { method: 'POST', body: JSON.stringify(game) }),
   updateGame: (id: number, changes: GameChanges) =>

@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'react'
 import { api, type Candidate, type NewGame, type Owner } from '../api'
 import { parseCount, toText } from '../fields'
 import { type OwnerChoice, OwnerPicker, toOwnerRef } from './OwnerPicker'
+import { SlicePicker } from './SlicePicker'
+import { DEFAULT_SLICE } from './Spine'
 
 /** What the review form starts from: a lookup match, or just a typed name. */
 export type ReviewStart = Candidate | { source: 'manual'; name: string }
@@ -15,12 +17,13 @@ interface Props {
 }
 
 const SOURCE_NOTE = {
-  bgg: 'Found on BoardGameGeek.',
-  gemini: 'Found by Gemini web search, so double-check it.',
+  catalog: 'Matched in the BoardGameGeek catalog; the cover and details come from an AI web search.',
+  web: 'Not in the catalog, so everything here comes from an AI web search.',
   manual: 'Entered by hand.',
 }
 
-const DETAIL_KEYS = ['min_players', 'max_players', 'playing_time'] as const
+/** The fields the AI lookup can fill in. */
+const FOUND_KEYS = ['min_players', 'max_players', 'playing_time', 'image_url'] as const
 
 function initialFields(start: ReviewStart) {
   const found = start.source === 'manual' ? null : start
@@ -30,7 +33,6 @@ function initialFields(start: ReviewStart) {
     min_players: toText(found?.min_players ?? null),
     max_players: toText(found?.max_players ?? null),
     playing_time: toText(found?.playing_time ?? null),
-    description: found?.description ?? '',
     image_url: found?.image_url ?? '',
   }
 }
@@ -40,20 +42,24 @@ export function ReviewGame({ start, owners, onBack, onAdded }: Props) {
   const queryClient = useQueryClient()
   const [fields, setFields] = useState(() => initialFields(start))
   const [imageBroken, setImageBroken] = useState(false)
+  const [slice, setSlice] = useState(DEFAULT_SLICE)
+  const [showLabel, setShowLabel] = useState(true)
   const [owner, setOwner] = useState<OwnerChoice>({
     id: owners.length === 0 ? 'new' : null,
     newName: '',
   })
   const set = (changes: Partial<typeof fields>) => setFields((current) => ({ ...current, ...changes }))
 
-  // Gemini fills in only the detail fields that are still blank.
+  // The AI lookup fills in only the fields that are still blank.
+  const bggId = start.source === 'catalog' ? start.bgg_id : null
   const details = useMutation({
-    mutationFn: () => api.lookupDetails(fields.name.trim(), parseCount(fields.year) ?? null),
+    mutationFn: () =>
+      api.lookupDetails(fields.name.trim(), parseCount(fields.year) ?? null, bggId),
     onSuccess: (found) =>
       setFields((current) => {
         const filled = { ...current }
-        for (const key of DETAIL_KEYS) {
-          if (!filled[key].trim()) filled[key] = toText(found[key])
+        for (const key of FOUND_KEYS) {
+          if (!filled[key].trim()) filled[key] = String(found[key] ?? '')
         }
         return filled
       }),
@@ -66,13 +72,13 @@ export function ReviewGame({ start, owners, onBack, onAdded }: Props) {
     },
   })
 
-  const missingDetails = DETAIL_KEYS.some((key) => !fields[key].trim())
+  const missing = FOUND_KEYS.some((key) => !fields[key].trim())
   const lookUpDetails = details.mutate
   const lookedUp = useRef(false)
   useEffect(() => {
     if (lookedUp.current) return
     lookedUp.current = true
-    if (DETAIL_KEYS.some((key) => !initialFields(start)[key])) lookUpDetails()
+    if (FOUND_KEYS.some((key) => !initialFields(start)[key])) lookUpDetails()
   }, [start, lookUpDetails])
 
   const name = fields.name.trim()
@@ -101,9 +107,10 @@ export function ReviewGame({ start, owners, onBack, onAdded }: Props) {
       ...ownerRef,
       ...(numbers as Record<keyof typeof numbers, number | null>),
       name,
-      bgg_id: start.source === 'bgg' ? start.bgg_id : null,
-      description: fields.description.trim() || null,
+      bgg_id: bggId,
       image_url: fields.image_url.trim() || null,
+      spine_position: slice,
+      spine_label: showLabel,
     }
     save.mutate(game)
   }
@@ -115,11 +122,14 @@ export function ReviewGame({ start, owners, onBack, onAdded }: Props) {
       <div className="review-body">
         <div className="review-cover">
           {fields.image_url.trim() && !imageBroken ? (
-            <img
-              src={fields.image_url.trim()}
-              alt="Cover preview"
-              referrerPolicy="no-referrer"
-              onError={() => setImageBroken(true)}
+            <SlicePicker
+              imageUrl={fields.image_url.trim()}
+              name={name || 'Game name'}
+              position={slice}
+              showLabel={showLabel}
+              onPositionChange={setSlice}
+              onShowLabelChange={setShowLabel}
+              onImageError={() => setImageBroken(true)}
             />
           ) : (
             <span className="no-cover">
@@ -174,13 +184,23 @@ export function ReviewGame({ start, owners, onBack, onAdded }: Props) {
               />
             </label>
           </div>
-          {details.isPending && <p className="hint">Looking up missing details with Gemini…</p>}
-          {!details.isPending && missingDetails && (
+          {details.isPending && (
+            <p className="hint">Searching the web for the cover and details…</p>
+          )}
+          {details.error && <p className="hint">{details.error.message}</p>}
+          {details.data?.searched === false && (
+            <p className="hint warning">
+              Web search is not available on the AI key, so these details come from the
+              AI's memory and no cover was found. Check them and paste a cover link.
+            </p>
+          )}
+          {!details.isPending && missing && (
             <p className="hint">
-              Some details are blank, so this game will be hidden by those filters.{' '}
+              Some fields are still blank.{' '}
               <button className="link" disabled={!name} onClick={() => lookUpDetails()}>
-                Look them up
-              </button>
+                Search again
+              </button>{' '}
+              or fill them in yourself.
             </p>
           )}
         </div>
@@ -196,15 +216,6 @@ export function ReviewGame({ start, owners, onBack, onAdded }: Props) {
             setImageBroken(false)
             set({ image_url: event.target.value })
           }}
-        />
-      </label>
-      <label>
-        Description
-        <textarea
-          rows={4}
-          maxLength={5000}
-          value={fields.description}
-          onChange={(event) => set({ description: event.target.value })}
         />
       </label>
 

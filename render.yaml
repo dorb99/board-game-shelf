@@ -1,0 +1,21 @@
+# Render blueprint: New > Blueprint, pick this repository.
+services:
+  - type: web
+    name: board-game-shelf
+    runtime: docker
+    # A persistent disk needs a paid plan; on the free plan the library is wiped on every restart.
+    plan: starter
+    # One instance only: the database is a SQLite file on the disk.
+    numInstances: 1
+    healthCheckPath: /api/owners
+    disk:
+      name: library-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false

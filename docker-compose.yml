@@ -1,0 +1,18 @@
+# Runs the production image locally: docker compose up --build, then http://localhost:8080
+services:
+  app:
+    build: .
+    ports:
+      - "${APP_PORT:-8080}:8000"
+    env_file:
+      - path: backend/.env
+        required: false
+    environment:
+      # Wins over a DATA_DIR in backend/.env, which points at a Windows path.
+      DATA_DIR: /data
+    volumes:
+      # The SQLite database, cover images and game catalog live here.
+      - library-data:/data
+
+volumes:
+  library-data:

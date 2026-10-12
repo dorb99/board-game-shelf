@@ -4,6 +4,7 @@ import { type ChatMessage, type Game, type Source, streamChat } from '../api'
 
 interface Entry extends ChatMessage {
   sources?: Source[]
+  notice?: string
   error?: string
 }
 
@@ -48,6 +49,8 @@ export function RulesChat({ game }: { game: Game }) {
             updateAnswer((answer) => ({ ...answer, text: answer.text + event.text }))
           } else if (event.type === 'sources') {
             updateAnswer((answer) => ({ ...answer, sources: event.sources }))
+          } else if (event.type === 'notice') {
+            updateAnswer((answer) => ({ ...answer, notice: event.message }))
           } else if (event.type === 'error') {
             updateAnswer((answer) => ({ ...answer, error: event.message }))
           }
@@ -87,6 +90,7 @@ export function RulesChat({ game }: { game: Game }) {
             {entry.role === 'model' && !entry.text && !entry.error && (
               <span className="thinking">Looking up the rules…</span>
             )}
+            {entry.notice && <p className="hint warning">{entry.notice}</p>}
             {entry.error && <p className="notice error">{entry.error}</p>}
             {entry.sources && (
               <p className="sources">

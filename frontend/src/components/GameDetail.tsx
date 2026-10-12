@@ -5,6 +5,8 @@ import { parseCount, toText } from '../fields'
 import { Modal } from './Modal'
 import { type OwnerChoice, OwnerPicker, toOwnerRef } from './OwnerPicker'
 import { RulesChat } from './RulesChat'
+import { SlicePicker } from './SlicePicker'
+import { DEFAULT_SLICE } from './Spine'
 
 interface Props {
   game: Game
@@ -18,6 +20,9 @@ export function GameDetail({ game, owners, onClose }: Props) {
   const [maxPlayers, setMaxPlayers] = useState(toText(game.max_players))
   const [playingTime, setPlayingTime] = useState(toText(game.playing_time))
   const [owner, setOwner] = useState<OwnerChoice>({ id: game.owner_id, newName: '' })
+  const [slice, setSlice] = useState(game.spine_position ?? DEFAULT_SLICE)
+  const [showLabel, setShowLabel] = useState(game.spine_label)
+  const [pickingSlice, setPickingSlice] = useState(false)
 
   const refresh = () => queryClient.invalidateQueries()
   const save = useMutation({
@@ -46,7 +51,9 @@ export function GameDetail({ game, owners, onClose }: Props) {
     parsed.min_players !== game.min_players ||
     parsed.max_players !== game.max_players ||
     parsed.playing_time !== game.playing_time ||
-    owner.id !== game.owner_id
+    owner.id !== game.owner_id ||
+    slice !== (game.spine_position ?? DEFAULT_SLICE) ||
+    showLabel !== game.spine_label
 
   function confirmRemove() {
     if (window.confirm(`Remove ${game.name} from the library?`)) remove.mutate()
@@ -55,10 +62,24 @@ export function GameDetail({ game, owners, onClose }: Props) {
   return (
     <Modal label={game.name} className="game-detail" onClose={onClose}>
       <div className="detail-side">
-        {game.image_url ? (
-          <img className="cover" src={game.image_url} alt={`${game.name} box cover`} />
-        ) : (
-          <div className="cover placeholder">{game.name}</div>
+        {!game.image_url && <div className="cover placeholder">{game.name}</div>}
+        {game.image_url && !pickingSlice && (
+          <>
+            <img className="cover" src={game.image_url} alt={`${game.name} box cover`} />
+            <button className="link" onClick={() => setPickingSlice(true)}>
+              Change the part shown on the shelf
+            </button>
+          </>
+        )}
+        {game.image_url && pickingSlice && (
+          <SlicePicker
+            imageUrl={game.image_url}
+            name={game.name}
+            position={slice}
+            showLabel={showLabel}
+            onPositionChange={setSlice}
+            onShowLabelChange={setShowLabel}
+          />
         )}
 
         <div className="detail-form">
@@ -100,7 +121,14 @@ export function GameDetail({ game, owners, onClose }: Props) {
             <button
               className="primary"
               disabled={!dirty || !valid || save.isPending}
-              onClick={() => save.mutate({ ...(parsed as GameChanges), ...ownerRef })}
+              onClick={() =>
+                save.mutate({
+                  ...(parsed as GameChanges),
+                  ...ownerRef,
+                  spine_position: slice,
+                  spine_label: showLabel,
+                })
+              }
             >
               {save.isPending ? 'Saving…' : 'Save changes'}
             </button>
@@ -118,7 +146,6 @@ export function GameDetail({ game, owners, onClose }: Props) {
         <h2>
           {game.name} {game.year && <span className="year">({game.year})</span>}
         </h2>
-        {game.description && <p className="description">{game.description}</p>}
         <RulesChat game={game} />
       </div>
     </Modal>
