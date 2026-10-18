@@ -13,6 +13,8 @@ export interface Game extends GameDetails {
   id: number
   name: string
   owner_id: number
+  /** The base game when this is an expansion; expansions always share its owner. */
+  parent_id: number | null
   bgg_id: number | null
   year: number | null
   image_url: string | null
@@ -46,7 +48,8 @@ export interface LookupResult {
 /** Either an existing owner or the name of one to create. */
 export type OwnerRef = { owner_id: number } | { owner_name: string }
 
-export type NewGame = OwnerRef &
+/** A new game names its owner; a new expansion names its base game and takes its owner. */
+export type NewGame = (OwnerRef | { parent_id: number }) &
   Partial<GameDetails> & {
     name: string
     bgg_id?: number | null

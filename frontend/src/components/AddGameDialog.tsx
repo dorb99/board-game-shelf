@@ -1,18 +1,22 @@
 import { useMutation } from '@tanstack/react-query'
 import { type FormEvent, useState } from 'react'
-import { api, type Candidate, type Owner } from '../api'
+import { api, type Candidate, type Game, type Owner } from '../api'
 import { playersLabel, timeLabel } from '../filters'
 import { Modal } from './Modal'
 import { ReviewGame, type ReviewStart } from './ReviewGame'
 
 interface Props {
   owners: Owner[]
+  /** Set to add an expansion for this game instead of a standalone game. */
+  base?: Game
   onClose: () => void
 }
 
 /** Two steps: search for the game, then review what was found before adding it. */
-export function AddGameDialog({ owners, onClose }: Props) {
-  const [query, setQuery] = useState('')
+export function AddGameDialog({ owners, base, onClose }: Props) {
+  const title = base ? `Add an expansion for ${base.name}` : 'Add a game'
+  // An expansion's name usually starts with its base game's, so the search does too.
+  const [query, setQuery] = useState(base ? `${base.name} ` : '')
   const [reviewing, setReviewing] = useState<ReviewStart | null>(null)
   const lookup = useMutation({ mutationFn: api.lookup })
   const candidates = lookup.data?.candidates ?? []
@@ -29,6 +33,7 @@ export function AddGameDialog({ owners, onClose }: Props) {
         <ReviewGame
           start={reviewing}
           owners={owners}
+          base={base}
           onBack={() => setReviewing(null)}
           onAdded={onClose}
         />
@@ -37,14 +42,14 @@ export function AddGameDialog({ owners, onClose }: Props) {
   }
 
   return (
-    <Modal label="Add a game" className="add-dialog" onClose={onClose}>
-      <h2>Add a game</h2>
+    <Modal label={title} className="add-dialog" onClose={onClose}>
+      <h2>{title}</h2>
 
       <form className="search-row" onSubmit={search}>
         <input
           autoFocus
           aria-label="Game name"
-          placeholder="Game name, e.g. Wingspan"
+          placeholder={base ? 'Expansion name' : 'Game name, e.g. Wingspan'}
           maxLength={120}
           value={query}
           onChange={(event) => setQuery(event.target.value)}

@@ -26,7 +26,9 @@ export function sliceBackground(imageUrl: string | null, position: number | null
 
 export function Spine({ game, onClick }: { game: Game; onClick: () => void }) {
   const h = hash(game.id)
-  const height = 40 + ((h >>> 4) % 3) * 5
+  const expansion = game.parent_id != null
+  // Expansion boxes are slimmer and pile up right under their base game.
+  const height = expansion ? 30 : 40 + ((h >>> 4) % 3) * 5
   const style = {
     width: Math.round(height * SPINE_ASPECT) + (h % 3) * 12,
     height,
@@ -36,7 +38,12 @@ export function Spine({ game, onClick }: { game: Game; onClick: () => void }) {
   // A box without a cover always needs its name; otherwise the label is optional.
   const showLabel = game.spine_label || !game.image_url
   return (
-    <button className="spine" style={style} title={game.name} onClick={onClick}>
+    <button
+      className={expansion ? 'spine expansion' : 'spine'}
+      style={style}
+      title={expansion ? `${game.name} (expansion)` : game.name}
+      onClick={onClick}
+    >
       {showLabel ? (
         <span className="spine-title">{game.name}</span>
       ) : (

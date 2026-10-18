@@ -28,6 +28,7 @@ ADDED_COLUMNS = {
     "game": {
         "spine_position": "INTEGER",
         "spine_label": "BOOLEAN NOT NULL DEFAULT TRUE",
+        "parent_id": "INTEGER REFERENCES game(id)",
     },
 }
 

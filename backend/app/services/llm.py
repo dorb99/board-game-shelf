@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from functools import lru_cache
 from typing import Protocol
 
@@ -28,10 +28,10 @@ Answer with ONLY a JSON object, no prose:
 "image_urls": [str] (up to 4 direct links to box cover image files, jpg/png/webp)}}
 playing_time is the typical play time in minutes. Use null when you cannot find a value."""
 
-RULES_SYSTEM = """You are the rules assistant for the board game "{name}"{year}{bgg}.
+RULES_SYSTEM = """You are the rules assistant for the board game "{name}"{year}{bgg}.{context}
 Search the web for the official rulebook, publisher FAQs and errata, and well
-regarded rules references before answering. Answer only questions about this game:
-its rules, setup, scoring, edge cases, variants and strategy basics.
+regarded rules references before answering. Answer only questions about this game
+and its expansions: rules, setup, scoring, edge cases, variants and strategy basics.
 Be concise and practical, as if helping people at the table mid-game. Use short
 markdown lists for multi-step procedures. If the rules differ between editions, or you
 could not confirm something, say so plainly instead of guessing."""
@@ -206,19 +206,41 @@ async def fetch_details(name: str, year: int | None, bgg_id: int | None) -> Foun
     )
 
 
+def _expansion_context(base_name: str | None, expansions: Sequence[str]) -> str:
+    """Tell the assistant which base game and which expansions are on the table."""
+    context = ""
+    if base_name:
+        context += (
+            f'\nIt is an expansion for "{base_name}"; answer for the two played together, '
+            "and say what the expansion changes when that helps."
+        )
+    if expansions:
+        names = ", ".join(f'"{name}"' for name in expansions)
+        context += (
+            f"\nThe players also own these expansions: {names}. Assume the base rules "
+            "unless they mention one, and say which expansion a rule comes from."
+        )
+    return context
+
+
 async def stream_rules_answer(
-    game: Game, messages: list[ChatMessage]
+    game: Game,
+    messages: list[ChatMessage],
+    base_name: str | None = None,
+    expansions: Sequence[str] = (),
 ) -> AsyncIterator[dict]:
     """Yield {"type": "text"} events as the answer streams, then one "sources" event.
 
-    If web search is refused for quota, a "notice" event says so and the answer comes
-    from the model's own knowledge.
+    `base_name` is the base game when `game` is an expansion; `expansions` are the other
+    expansions owned for it. If web search is refused for quota, a "notice" event says so
+    and the answer comes from the model's own knowledge.
     """
     provider = get_provider()
     system = RULES_SYSTEM.format(
         name=game.name,
         year=f" ({game.year})" if game.year else "",
         bgg=f", BoardGameGeek id {game.bgg_id}" if game.bgg_id else "",
+        context=_expansion_context(base_name, expansions),
     )
     started = False
     try:

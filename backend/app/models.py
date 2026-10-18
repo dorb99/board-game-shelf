@@ -21,6 +21,8 @@ class Game(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True)
     owner_id: int = Field(foreign_key="owner.id", index=True)
+    # Set on an expansion: its base game, whose owner it always shares.
+    parent_id: int | None = Field(default=None, foreign_key="game.id", index=True)
     bgg_id: int | None = None
     year: int | None = None
     min_players: int | None = None
@@ -47,6 +49,7 @@ class GameRead(BaseModel):
     id: int
     name: str
     owner_id: int
+    parent_id: int | None
     bgg_id: int | None
     year: int | None
     min_players: int | None
@@ -68,6 +71,8 @@ class GameCreate(BaseModel):
     name: str = PydanticField(min_length=1, max_length=200)
     owner_id: int | None = None
     owner_name: str | None = PydanticField(default=None, min_length=1, max_length=60)
+    # An expansion takes its owner from this base game; owner_id and owner_name are ignored.
+    parent_id: int | None = None
     bgg_id: int | None = None
     year: int | None = None
     min_players: int | None = Players
@@ -81,6 +86,8 @@ class GameCreate(BaseModel):
 class GameUpdate(BaseModel):
     owner_id: int | None = None
     owner_name: str | None = PydanticField(default=None, min_length=1, max_length=60)
+    # A base game id makes this an expansion of it; null makes it a standalone game.
+    parent_id: int | None = None
     min_players: int | None = Players
     max_players: int | None = Players
     playing_time: int | None = Minutes

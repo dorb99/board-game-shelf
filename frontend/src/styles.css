@@ -265,6 +265,15 @@ button.spine:focus-visible {
   z-index: 1;
 }
 
+/* An expansion: a slimmer box with a gold edge, piled under its base game. */
+.spine.expansion {
+  border-left: 5px solid #d9a74a;
+}
+
+.spine.expansion .spine-title {
+  font-size: 0.75rem;
+}
+
 .spine-title {
   max-width: calc(100% - 16px);
   padding: 2px 10px;
@@ -564,6 +573,29 @@ button.spine:focus-visible {
   display: flex;
   justify-content: space-between;
   gap: 8px;
+}
+
+.expansion-of {
+  margin: -6px 0 0;
+  color: var(--muted);
+}
+
+.expansions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.expansions h3 {
+  width: 100%;
+  margin: 0;
+  font-size: 1rem;
+}
+
+.expansions ul {
+  display: contents;
+  list-style: none;
 }
 
 /* Rules chat */

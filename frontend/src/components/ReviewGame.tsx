@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
-import { api, type Candidate, type NewGame, type Owner } from '../api'
+import { api, type Candidate, type Game, type NewGame, type Owner } from '../api'
 import { parseCount, toText } from '../fields'
 import { type OwnerChoice, OwnerPicker, toOwnerRef } from './OwnerPicker'
 import { SlicePicker } from './SlicePicker'
@@ -12,6 +12,8 @@ export type ReviewStart = Candidate | { source: 'manual'; name: string }
 interface Props {
   start: ReviewStart
   owners: Owner[]
+  /** Set when adding an expansion: the game it expands, whose owner it takes. */
+  base?: Game
   onBack: () => void
   onAdded: () => void
 }
@@ -38,7 +40,7 @@ function initialFields(start: ReviewStart) {
 }
 
 /** Shows everything the lookup found so it can be checked and corrected before adding. */
-export function ReviewGame({ start, owners, onBack, onAdded }: Props) {
+export function ReviewGame({ start, owners, base, onBack, onAdded }: Props) {
   const queryClient = useQueryClient()
   const [fields, setFields] = useState(() => initialFields(start))
   const [imageBroken, setImageBroken] = useState(false)
@@ -88,7 +90,8 @@ export function ReviewGame({ start, owners, onBack, onAdded }: Props) {
     max_players: parseCount(fields.max_players),
     playing_time: parseCount(fields.playing_time),
   }
-  const ownerRef = toOwnerRef(owner)
+  const ownerRef = base ? { parent_id: base.id } : toOwnerRef(owner)
+  const baseOwner = base && owners.find((candidate) => candidate.id === base.owner_id)
   const rangeInverted =
     numbers.min_players != null &&
     numbers.max_players != null &&
@@ -226,7 +229,14 @@ export function ReviewGame({ start, owners, onBack, onAdded }: Props) {
         <button className="secondary" onClick={onBack}>
           Back
         </button>
-        <OwnerPicker owners={owners} value={owner} onChange={setOwner} />
+        {base ? (
+          <span className="hint">
+            Expansion for {base.name}
+            {baseOwner && `, on ${baseOwner.name}'s shelf`}
+          </span>
+        ) : (
+          <OwnerPicker owners={owners} value={owner} onChange={setOwner} />
+        )}
         <button
           className="primary"
           disabled={problem != null || !ownerRef || save.isPending || details.isPending}

@@ -271,3 +271,10 @@ def test_rules_chat_falls_back_with_a_notice(monkeypatch):
 def test_extract_json_without_json():
     with pytest.raises(ValueError):
         llm.extract_json("I could not find that game.")
+
+
+def test_rules_prompt_names_the_base_game_and_owned_expansions():
+    context = llm._expansion_context("Catan", ["Seafarers", "Cities & Knights"])
+    assert '"Catan"' in context
+    assert '"Seafarers", "Cities & Knights"' in context
+    assert llm._expansion_context(None, []) == ""

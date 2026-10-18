@@ -212,3 +212,47 @@ def test_create_saves_exactly_what_was_reviewed(client, monkeypatch):
     game = add_game(client, playing_time=None).json()
     assert game["playing_time"] is None
     assert "description" not in game
+
+
+def test_expansion_takes_its_base_games_owner(client):
+    base = add_game(client).json()
+    expansion = add_game(client, name="Seafarers", owner_name="Noa", parent_id=base["id"])
+    assert expansion.status_code == 201
+    assert expansion.json()["parent_id"] == base["id"]
+    assert expansion.json()["owner_id"] == base["owner_id"]
+    assert len(client.get("/api/owners").json()) == 1
+
+
+def test_expansions_go_one_level_deep(client):
+    base = add_game(client).json()
+    expansion = add_game(client, name="Seafarers", parent_id=base["id"]).json()
+    assert add_game(client, name="Pirates", parent_id=expansion["id"]).status_code == 422
+    assert add_game(client, name="Pirates", parent_id=999).status_code == 404
+    patch = lambda game, **changes: client.patch(f"/api/games/{game['id']}", json=changes)
+    assert patch(base, parent_id=base["id"]).status_code == 422
+    other = add_game(client, name="Azul").json()
+    assert patch(base, parent_id=other["id"]).status_code == 422  # base has expansions
+
+
+def test_linking_and_unlinking_an_expansion(client):
+    base = add_game(client).json()
+    loose = add_game(client, name="Seafarers", owner_name="Noa").json()
+    linked = client.patch(f"/api/games/{loose['id']}", json={"parent_id": base["id"]}).json()
+    assert (linked["parent_id"], linked["owner_id"]) == (base["id"], base["owner_id"])
+    noa = client.post("/api/owners", json={"name": "Noa2"}).json()
+    moved = client.patch(f"/api/games/{loose['id']}", json={"owner_id": noa["id"]})
+    assert moved.status_code == 422  # an expansion follows its base game
+    freed = client.patch(f"/api/games/{loose['id']}", json={"parent_id": None}).json()
+    assert freed["parent_id"] is None
+
+
+def test_expansions_move_and_go_with_their_base_game(client):
+    base = add_game(client).json()
+    expansion = add_game(client, name="Seafarers", parent_id=base["id"]).json()
+    moved = client.patch(f"/api/games/{base['id']}", json={"owner_name": "Noa"}).json()
+    games = {game["id"]: game for game in client.get("/api/games").json()}
+    assert games[expansion["id"]]["owner_id"] == moved["owner_id"]
+
+    assert client.delete(f"/api/games/{base['id']}").status_code == 204
+    assert client.get("/api/games").json() == []
+    assert client.get(expansion["image_url"]).status_code == 404

@@ -43,6 +43,26 @@ def get_game_or_404(session: Session, game_id: int) -> Game:
     return game
 
 
+def expansions_of(session: Session, game: Game) -> list[Game]:
+    statement = select(Game).where(Game.parent_id == game.id).order_by(func.lower(Game.name))
+    return list(session.exec(statement)) if game.id is not None else []
+
+
+def get_base_game(session: Session, parent_id: int, child: Game | None = None) -> Game:
+    """The game an expansion is added to; expansions only go one level deep."""
+    parent = session.get(Game, parent_id)
+    if parent is None:
+        raise HTTPException(404, "Base game not found.")
+    if parent.parent_id is not None:
+        raise HTTPException(422, f"{parent.name} is itself an expansion.")
+    if child is not None:
+        if parent.id == child.id:
+            raise HTTPException(422, "A game cannot be an expansion of itself.")
+        if expansions_of(session, child):
+            raise HTTPException(422, f"{child.name} has expansions of its own.")
+    return parent
+
+
 @router.get("")
 def list_games(
     owner_id: int | None = None, session: Session = Depends(get_session)
@@ -58,7 +78,10 @@ async def create_game(data: GameCreate, session: Session = Depends(get_session))
     name = data.name.strip()
     if not name:
         raise HTTPException(422, "Game name cannot be blank.")
-    owner = resolve_owner(session, data.owner_id, data.owner_name)
+    if data.parent_id is not None:
+        owner = session.get(Owner, get_base_game(session, data.parent_id).owner_id)
+    else:
+        owner = resolve_owner(session, data.owner_id, data.owner_name)
     assert_not_owned(session, owner, name)
 
     fields = data.model_dump(exclude={"name", "owner_id", "owner_name", "image_url"})
@@ -86,12 +109,29 @@ def update_game(
     game = get_game_or_404(session, game_id)
     changes = data.model_dump(exclude_unset=True)
 
+    if "parent_id" in changes:
+        if data.parent_id is None:
+            game.parent_id = None
+        else:
+            parent = get_base_game(session, data.parent_id, child=game)
+            owner = session.get(Owner, parent.owner_id)
+            assert_not_owned(session, owner, game.name, ignore_id=game.id)
+            game.parent_id = parent.id
+            game.owner_id = parent.owner_id
+
     if changes.get("owner_id") is not None or changes.get("owner_name"):
+        if game.parent_id is not None:
+            raise HTTPException(422, "An expansion always belongs to its base game's owner.")
         owner = resolve_owner(session, data.owner_id, data.owner_name)
-        assert_not_owned(session, owner, game.name, ignore_id=game.id)
+        # The expansions move with their base game.
+        moving = [game, *expansions_of(session, game)]
+        for item in moving:
+            assert_not_owned(session, owner, item.name, ignore_id=item.id)
         session.add(owner)
         session.flush()
-        game.owner_id = owner.id
+        for item in moving:
+            item.owner_id = owner.id
+            session.add(item)
 
     for key in (*DETAIL_FIELDS, "spine_position"):
         if key in changes:
@@ -110,6 +150,11 @@ def update_game(
 @router.delete("/{game_id}", status_code=204)
 def delete_game(game_id: int, session: Session = Depends(get_session)) -> None:
     game = get_game_or_404(session, game_id)
+    # Its expansions go with it, removed first so no row points at a deleted game.
+    for expansion in expansions_of(session, game):
+        images.delete_cover(session, expansion.image_path)
+        session.delete(expansion)
+    session.flush()
     images.delete_cover(session, game.image_path)
     session.delete(game)
     session.commit()

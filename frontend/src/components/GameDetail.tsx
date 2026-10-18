@@ -11,10 +11,13 @@ import { DEFAULT_SLICE } from './Spine'
 interface Props {
   game: Game
   owners: Owner[]
+  games: Game[]
+  onSelect: (gameId: number) => void
+  onAddExpansion: () => void
   onClose: () => void
 }
 
-export function GameDetail({ game, owners, onClose }: Props) {
+export function GameDetail({ game, owners, games, onSelect, onAddExpansion, onClose }: Props) {
   const queryClient = useQueryClient()
   const [minPlayers, setMinPlayers] = useState(toText(game.min_players))
   const [maxPlayers, setMaxPlayers] = useState(toText(game.max_players))
@@ -23,6 +26,9 @@ export function GameDetail({ game, owners, onClose }: Props) {
   const [slice, setSlice] = useState(game.spine_position ?? DEFAULT_SLICE)
   const [showLabel, setShowLabel] = useState(game.spine_label)
   const [pickingSlice, setPickingSlice] = useState(false)
+
+  const base = games.find((other) => other.id === game.parent_id)
+  const expansions = games.filter((other) => other.parent_id === game.id)
 
   const refresh = () => queryClient.invalidateQueries()
   const save = useMutation({
@@ -56,7 +62,10 @@ export function GameDetail({ game, owners, onClose }: Props) {
     showLabel !== game.spine_label
 
   function confirmRemove() {
-    if (window.confirm(`Remove ${game.name} from the library?`)) remove.mutate()
+    const also = expansions.length
+      ? ` Its ${expansions.length === 1 ? 'expansion goes' : `${expansions.length} expansions go`} too.`
+      : ''
+    if (window.confirm(`Remove ${game.name} from the library?${also}`)) remove.mutate()
   }
 
   return (
@@ -112,10 +121,13 @@ export function GameDetail({ game, owners, onClose }: Props) {
               onChange={(event) => setPlayingTime(event.target.value)}
             />
           </label>
-          <label>
-            Owner
-            <OwnerPicker owners={owners} value={owner} onChange={setOwner} />
-          </label>
+          {/* An expansion always sits on its base game's shelf. */}
+          {!base && (
+            <label>
+              Owner
+              <OwnerPicker owners={owners} value={owner} onChange={setOwner} />
+            </label>
+          )}
 
           <div className="detail-actions">
             <button
@@ -124,7 +136,7 @@ export function GameDetail({ game, owners, onClose }: Props) {
               onClick={() =>
                 save.mutate({
                   ...(parsed as GameChanges),
-                  ...ownerRef,
+                  ...(base ? {} : ownerRef),
                   spine_position: slice,
                   spine_label: showLabel,
                 })
@@ -146,6 +158,32 @@ export function GameDetail({ game, owners, onClose }: Props) {
         <h2>
           {game.name} {game.year && <span className="year">({game.year})</span>}
         </h2>
+        {base ? (
+          <p className="expansion-of">
+            Expansion for{' '}
+            <button className="link" onClick={() => onSelect(base.id)}>
+              {base.name}
+            </button>
+          </p>
+        ) : (
+          <div className="expansions">
+            <h3>Expansions</h3>
+            {expansions.length > 0 && (
+              <ul>
+                {expansions.map((expansion) => (
+                  <li key={expansion.id}>
+                    <button className="link" onClick={() => onSelect(expansion.id)}>
+                      {expansion.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <button className="secondary" onClick={onAddExpansion}>
+              + Add expansion
+            </button>
+          </div>
+        )}
         <RulesChat game={game} />
       </div>
     </Modal>

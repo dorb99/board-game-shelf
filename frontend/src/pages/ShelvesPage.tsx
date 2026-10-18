@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { api } from '../api'
+import { api, type Game } from '../api'
 import { AddGameDialog } from '../components/AddGameDialog'
 import { FilterBar } from '../components/FilterBar'
 import { GameDetail } from '../components/GameDetail'
@@ -12,7 +12,8 @@ export function ShelvesPage() {
   const games = useQuery({ queryKey: ['games'], queryFn: api.games })
   const [filters, setFilters] = useState<Filters>(NO_FILTERS)
   const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [adding, setAdding] = useState(false)
+  // What the add dialog is adding: a game, or an expansion for `base`.
+  const [adding, setAdding] = useState<{ base?: Game } | null>(null)
 
   const allOwners = owners.data ?? []
   const allGames = games.data ?? []
@@ -27,7 +28,7 @@ export function ShelvesPage() {
     <div className="page">
       <header className="page-header">
         <h1>🎲 Board Games Library</h1>
-        <button className="primary" onClick={() => setAdding(true)}>
+        <button className="primary" onClick={() => setAdding({})}>
           + Add game
         </button>
       </header>
@@ -55,12 +56,20 @@ export function ShelvesPage() {
         ))}
       </main>
 
-      {adding && <AddGameDialog owners={allOwners} onClose={() => setAdding(false)} />}
+      {adding && (
+        <AddGameDialog owners={allOwners} base={adding.base} onClose={() => setAdding(null)} />
+      )}
       {selected && (
         <GameDetail
           key={selected.id}
           game={selected}
           owners={allOwners}
+          games={allGames}
+          onSelect={setSelectedId}
+          onAddExpansion={() => {
+            setSelectedId(null)
+            setAdding({ base: selected })
+          }}
           onClose={() => setSelectedId(null)}
         />
       )}
