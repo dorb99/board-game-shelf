@@ -138,12 +138,14 @@ def test_lookup_uses_catalog_before_llm(client, monkeypatch):
     from app.models import Candidate
     from app.services import catalog, llm
 
-    async def must_not_run(query):
+    async def must_not_run(query, expansion_for=None):
         raise AssertionError("The LLM must not be asked when the catalog has a match")
 
     found = [Candidate(source="catalog", bgg_id=13, name="CATAN", year=1995)]
     monkeypatch.setattr(catalog, "is_available", lambda: True)
-    monkeypatch.setattr(catalog, "search", lambda query: found if query == "catan" else [])
+    monkeypatch.setattr(
+        catalog, "search", lambda query, **_: found if query == "catan" else []
+    )
     monkeypatch.setattr(llm, "is_configured", lambda: True)
     monkeypatch.setattr(llm, "lookup_candidates", must_not_run)
     body = client.get("/api/lookup", params={"q": " catan "}).json()
@@ -155,16 +157,46 @@ def test_lookup_falls_back_to_llm_when_not_in_catalog(client, monkeypatch):
     from app.models import Candidate
     from app.services import catalog, llm
 
-    async def fake_lookup(query):
+    async def fake_lookup(query, expansion_for=None):
         return [Candidate(source="web", name="Brand New Game")], False
 
     monkeypatch.setattr(catalog, "is_available", lambda: True)
-    monkeypatch.setattr(catalog, "search", lambda query: [])
+    monkeypatch.setattr(catalog, "search", lambda query, **_: [])
     monkeypatch.setattr(llm, "is_configured", lambda: True)
     monkeypatch.setattr(llm, "lookup_candidates", fake_lookup)
     body = client.get("/api/lookup", params={"q": "brand new game"}).json()
     assert [c["source"] for c in body["candidates"]] == ["web"]
     assert body["warnings"] == [llm.not_searched_message()]  # search was refused, so say so
+
+
+def test_expansion_lookups_name_the_base_game(client, monkeypatch):
+    from app.models import Candidate, FoundDetails
+    from app.services import catalog, llm
+
+    asked = []
+
+    def fake_search(query, expansions_first=False):
+        asked.append(("catalog", expansions_first))
+        return []
+
+    async def fake_lookup(query, expansion_for=None):
+        asked.append(("web", expansion_for))
+        return [Candidate(source="web", name="Seafarers", is_expansion=True)], True
+
+    async def fake_fetch_details(name, year, bgg_id, expansion_for=None, **_):
+        asked.append(("details", expansion_for))
+        return FoundDetails(min_players=5, max_players=6)
+
+    monkeypatch.setattr(catalog, "is_available", lambda: True)
+    monkeypatch.setattr(catalog, "search", fake_search)
+    monkeypatch.setattr(llm, "is_configured", lambda: True)
+    monkeypatch.setattr(llm, "lookup_candidates", fake_lookup)
+    monkeypatch.setattr(llm, "fetch_details", fake_fetch_details)
+    params = {"q": "seafarers", "expansion_for": " Catan "}
+    assert client.get("/api/lookup", params=params).status_code == 200
+    params = {"name": "Seafarers", "expansion_for": "Catan"}
+    assert client.get("/api/lookup/details", params=params).json()["max_players"] == 6
+    assert asked == [("catalog", True), ("web", "Catan"), ("details", "Catan")]
 
 
 def test_chat_requires_llm_key(client):
@@ -184,8 +216,8 @@ def test_details_lookup_uses_llm(client, monkeypatch):
     from app.models import FoundDetails
     from app.services import llm
 
-    async def fake_fetch_details(name, year, bgg_id):
-        assert (name, year, bgg_id) == ("Catan", 1995, 13)
+    async def fake_fetch_details(name, year, bgg_id, expansion_for=None, **_):
+        assert (name, year, bgg_id, expansion_for) == ("Catan", 1995, 13, None)
         return FoundDetails(min_players=3, max_players=4, image_url="https://example.com/c.jpg")
 
     monkeypatch.setattr(llm, "is_configured", lambda: True)
@@ -198,13 +230,14 @@ def test_details_lookup_uses_llm(client, monkeypatch):
         "playing_time": None,
         "image_url": "https://example.com/c.jpg",
         "searched": True,
+        "used_ai": True,
     }
 
 
 def test_create_saves_exactly_what_was_reviewed(client, monkeypatch):
     from app.services import llm
 
-    async def must_not_run(name, year, bgg_id):
+    async def must_not_run(name, year, bgg_id, expansion_for=None):
         raise AssertionError("create must not look details up on its own")
 
     monkeypatch.setattr(llm, "is_configured", lambda: True)
@@ -256,3 +289,128 @@ def test_expansions_move_and_go_with_their_base_game(client):
     assert client.delete(f"/api/games/{base['id']}").status_code == 204
     assert client.get("/api/games").json() == []
     assert client.get(expansion["image_url"]).status_code == 404
+
+
+def use_bgg(monkeypatch, things=None, search=None):
+    """Turn the BGG API on with canned answers; returns the list of calls made to it."""
+    from app.services import bgg
+
+    calls = []
+
+    async def fake_things(ids):
+        calls.append(("thing", list(ids)))
+        return {i: t for i, t in (things or {}).items() if i in ids}
+
+    async def fake_search(query, expansions_first=False):
+        calls.append(("search", query))
+        return [t.candidate() for t in search or []]
+
+    monkeypatch.setattr(bgg, "is_configured", lambda: True)
+    monkeypatch.setattr(bgg, "things", fake_things)
+    monkeypatch.setattr(bgg, "search", fake_search)
+    return calls
+
+
+def bgg_thing(**overrides):
+    from app.services.bgg import Thing
+
+    fields = dict(bgg_id=13, name="CATAN", year=1995, is_expansion=False, min_players=3,
+                  max_players=4, playing_time=90, image_url="https://cf.geekdo-images.com/c.jpg",
+                  thumbnail_url="https://cf.geekdo-images.com/t.jpg")
+    return Thing(**(fields | overrides))
+
+
+def test_lookup_fills_catalog_matches_in_from_bgg(client, monkeypatch):
+    from app.models import Candidate
+    from app.services import catalog
+
+    found = [Candidate(source="catalog", bgg_id=13, name="CATAN", year=1995)]
+    monkeypatch.setattr(catalog, "is_available", lambda: True)
+    monkeypatch.setattr(catalog, "search", lambda query, **_: found)
+    calls = use_bgg(monkeypatch, things={13: bgg_thing()})
+    (catan,) = client.get("/api/lookup", params={"q": "catan"}).json()["candidates"]
+    assert (catan["source"], catan["max_players"], catan["playing_time"]) == ("bgg", 4, 90)
+    assert catan["image_url"] == "https://cf.geekdo-images.com/c.jpg"
+    assert calls == [("thing", [13])]
+
+
+def test_lookup_searches_bgg_before_the_llm(client, monkeypatch):
+    from app.services import catalog, llm
+
+    async def must_not_run(query, expansion_for=None):
+        raise AssertionError("The LLM must not be asked when BGG finds the game")
+
+    monkeypatch.setattr(catalog, "is_available", lambda: True)
+    monkeypatch.setattr(catalog, "search", lambda query, **_: [])
+    monkeypatch.setattr(llm, "is_configured", lambda: True)
+    monkeypatch.setattr(llm, "lookup_candidates", must_not_run)
+    calls = use_bgg(monkeypatch, search=[bgg_thing(bgg_id=400, name="Brand New Game")])
+    body = client.get("/api/lookup", params={"q": "brand new game"}).json()
+    assert [(c["source"], c["bgg_id"]) for c in body["candidates"]] == [("bgg", 400)]
+    assert calls == [("search", "brand new game")]
+
+
+def test_lookup_goes_on_to_the_llm_when_bgg_fails(client, monkeypatch):
+    from app.models import Candidate
+    from app.services import bgg, catalog, llm
+
+    async def broken(*args, **kwargs):
+        raise bgg.BggError("BoardGameGeek answered 503.")
+
+    async def fake_lookup(query, expansion_for=None):
+        return [Candidate(source="web", name="Brand New Game")], True
+
+    monkeypatch.setattr(catalog, "is_available", lambda: True)
+    monkeypatch.setattr(catalog, "search", lambda query, **_: [])
+    monkeypatch.setattr(bgg, "is_configured", lambda: True)
+    monkeypatch.setattr(bgg, "search", broken)
+    monkeypatch.setattr(llm, "is_configured", lambda: True)
+    monkeypatch.setattr(llm, "lookup_candidates", fake_lookup)
+    body = client.get("/api/lookup", params={"q": "brand new game"}).json()
+    assert [c["source"] for c in body["candidates"]] == ["web"]
+
+
+def test_details_from_bgg_need_no_llm(client, monkeypatch):
+    use_bgg(monkeypatch, things={13: bgg_thing()})
+    body = client.get("/api/lookup/details", params={"name": "Catan", "bgg_id": 13}).json()
+    assert body == {
+        "min_players": 3,
+        "max_players": 4,
+        "playing_time": 90,
+        "image_url": "https://cf.geekdo-images.com/c.jpg",
+        "searched": True,
+        "used_ai": False,
+    }
+
+
+def test_details_ask_the_llm_only_for_what_bgg_lacks(client, monkeypatch):
+    from app.models import FoundDetails
+    from app.services import llm
+
+    asked = []
+
+    async def fake_fetch_details(name, year, bgg_id, expansion_for=None, wanted=()):
+        asked.append(list(wanted))
+        return FoundDetails(min_players=9, playing_time=45, image_url="https://e.com/x.jpg")
+
+    use_bgg(monkeypatch, things={13: bgg_thing(playing_time=None, image_url=None)})
+    monkeypatch.setattr(llm, "is_configured", lambda: True)
+    monkeypatch.setattr(llm, "fetch_details", fake_fetch_details)
+    params = {"name": "Catan", "bgg_id": 13, "want": ["min_players", "playing_time"]}
+    body = client.get("/api/lookup/details", params=params).json()
+    assert asked == [["playing_time"]]  # the cover was not wanted, and BGG had the players
+    assert (body["min_players"], body["playing_time"], body["image_url"]) == (3, 45, None)
+    assert body["used_ai"] is True
+
+
+def test_details_keep_what_bgg_found_when_the_llm_fails(client, monkeypatch):
+    from app.services import llm
+
+    async def broken(*args, **kwargs):
+        raise RuntimeError("down")
+
+    use_bgg(monkeypatch, things={13: bgg_thing(image_url=None)})
+    monkeypatch.setattr(llm, "is_configured", lambda: True)
+    monkeypatch.setattr(llm, "fetch_details", broken)
+    body = client.get("/api/lookup/details", params={"name": "Catan", "bgg_id": 13}).json()
+    assert (body["max_players"], body["image_url"]) == (4, None)

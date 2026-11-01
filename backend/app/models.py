@@ -96,7 +96,8 @@ class GameUpdate(BaseModel):
 
 
 class Candidate(BaseModel):
-    source: Literal["catalog", "web"]
+    # catalog: name match only; bgg: details from the BGG API; web: found by the LLM
+    source: Literal["catalog", "bgg", "web"]
     bgg_id: int | None = None
     name: str
     year: int | None = None
@@ -108,14 +109,19 @@ class Candidate(BaseModel):
     image_url: str | None = None
 
 
+DetailField = Literal["min_players", "max_players", "playing_time", "image_url"]
+DETAIL_FIELDS: tuple[DetailField, ...] = ("min_players", "max_players", "playing_time", "image_url")
+
+
 class FoundDetails(BaseModel):
-    """What the LLM found online for one game; unknown values are null."""
+    """What BGG and the LLM found for one game; unknown values are null."""
 
     min_players: int | None = None
     max_players: int | None = None
     playing_time: int | None = None
     image_url: str | None = None
     searched: bool = True  # False when web search was refused and the LLM answered from memory
+    used_ai: bool = False  # True when the LLM was asked for anything BGG did not have
 
 
 class LookupResult(BaseModel):

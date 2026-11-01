@@ -9,7 +9,7 @@ from functools import lru_cache
 from typing import Protocol
 
 from ..config import settings
-from ..models import Candidate, ChatMessage, FoundDetails, Game
+from ..models import DETAIL_FIELDS, Candidate, ChatMessage, DetailField, FoundDetails, Game
 from . import images
 
 logger = logging.getLogger(__name__)
@@ -22,11 +22,36 @@ Answer with ONLY a JSON array, no prose, where each element is:
 "playing_time": int|null (minutes),
 "image_urls": [str] (up to 3 direct links to box cover image files, jpg/png/webp)}}"""
 
+EXPANSION_LOOKUP_PROMPT = """Search the web for expansions of the board game "{base}" that
+match the name "{query}".
+Return up to 4 published expansions for that game that best match the name.
+min_players and max_players are the player counts the game supports once this expansion
+is added, and playing_time is the typical play time in minutes with it.
+Answer with ONLY a JSON array, no prose, where each element is:
+{{"name": str, "year": int|null, "min_players": int|null, "max_players": int|null,
+"playing_time": int|null,
+"image_urls": [str] (up to 3 direct links to box cover image files, jpg/png/webp)}}"""
+
 DETAILS_PROMPT = """Search the web for the board game "{name}"{year}{bgg}.
 Answer with ONLY a JSON object, no prose:
-{{"min_players": int|null, "max_players": int|null, "playing_time": int|null,
-"image_urls": [str] (up to 4 direct links to box cover image files, jpg/png/webp)}}
+{{{fields}}}
 playing_time is the typical play time in minutes. Use null when you cannot find a value."""
+
+EXPANSION_DETAILS_PROMPT = """Search the web for "{name}"{year}{bgg}, an expansion for the
+board game "{base}".
+Answer with ONLY a JSON object, no prose:
+{{{fields}}}
+min_players and max_players are the player counts the game supports once this expansion
+is added, and playing_time is the typical play time in minutes with it. Use null when you
+cannot find a value."""
+
+# How each detail is asked for in the JSON answer.
+DETAIL_ANSWERS: dict[DetailField, str] = {
+    "min_players": '"min_players": int|null',
+    "max_players": '"max_players": int|null',
+    "playing_time": '"playing_time": int|null',
+    "image_url": '"image_urls": [str] (up to 4 direct links to box cover image files, jpg/png/webp)',
+}
 
 RULES_SYSTEM = """You are the rules assistant for the board game "{name}"{year}{bgg}.{context}
 Search the web for the official rulebook, publisher FAQs and errata, and well
@@ -159,9 +184,19 @@ async def _first_working_image(urls) -> str | None:
     return next((url for url, ok in zip(urls, checks) if ok), None)
 
 
-async def lookup_candidates(query: str) -> tuple[list[Candidate], bool]:
-    """Find games by name; also returns whether the web was actually searched."""
-    prompt = LOOKUP_PROMPT.format(query=query.replace('"', "'"))
+def _quoted(text: str) -> str:
+    return text.replace('"', "'")
+
+
+async def lookup_candidates(
+    query: str, expansion_for: str | None = None
+) -> tuple[list[Candidate], bool]:
+    """Find games by name, or expansions of `expansion_for`; also returns whether the
+    web was actually searched."""
+    if expansion_for:
+        prompt = EXPANSION_LOOKUP_PROMPT.format(query=_quoted(query), base=_quoted(expansion_for))
+    else:
+        prompt = LOOKUP_PROMPT.format(query=_quoted(query))
     data, searched = await _searched_json(prompt)
     if not isinstance(data, list):
         return [], searched
@@ -174,6 +209,7 @@ async def lookup_candidates(query: str) -> tuple[list[Candidate], bool]:
         Candidate(
             source="web",
             name=str(entry["name"])[:200],
+            is_expansion=bool(expansion_for),
             year=_positive_int(entry.get("year")),
             min_players=_positive_int(entry.get("min_players")),
             max_players=_positive_int(entry.get("max_players")),
@@ -186,23 +222,37 @@ async def lookup_candidates(query: str) -> tuple[list[Candidate], bool]:
     return candidates, searched
 
 
-async def fetch_details(name: str, year: int | None, bgg_id: int | None) -> FoundDetails:
-    """Look up one game's players, play time and a working cover link."""
-    prompt = DETAILS_PROMPT.format(
-        name=name.replace('"', "'"),
+async def fetch_details(
+    name: str,
+    year: int | None,
+    bgg_id: int | None,
+    expansion_for: str | None = None,
+    wanted: Sequence[DetailField] = DETAIL_FIELDS,
+) -> FoundDetails:
+    """Look up the `wanted` details of one game: players, play time, a working cover link.
+
+    For an expansion of `expansion_for`, the players and time are with it added.
+    """
+    template = EXPANSION_DETAILS_PROMPT if expansion_for else DETAILS_PROMPT
+    prompt = template.format(
+        name=_quoted(name),
         year=f" ({year})" if year else "",
         bgg=f", BoardGameGeek id {bgg_id}" if bgg_id else "",
+        base=_quoted(expansion_for or ""),
+        fields=", ".join(DETAIL_ANSWERS[field] for field in DETAIL_FIELDS if field in wanted),
     )
     data, searched = await _searched_json(prompt)
     if not isinstance(data, dict):
-        return FoundDetails(searched=searched)
+        return FoundDetails(searched=searched, used_ai=True)
+    # An image link recalled from memory is a guess, so only searched ones are used.
+    image_urls = data.get("image_urls") if searched and "image_url" in wanted else None
     return FoundDetails(
         searched=searched,
-        min_players=_positive_int(data.get("min_players")),
-        max_players=_positive_int(data.get("max_players")),
-        playing_time=_positive_int(data.get("playing_time")),
-        # An image link recalled from memory is a guess, so only searched ones are used.
-        image_url=await _first_working_image(data.get("image_urls") if searched else None),
+        used_ai=True,
+        min_players=_positive_int(data.get("min_players")) if "min_players" in wanted else None,
+        max_players=_positive_int(data.get("max_players")) if "max_players" in wanted else None,
+        playing_time=_positive_int(data.get("playing_time")) if "playing_time" in wanted else None,
+        image_url=await _first_working_image(image_urls),
     )
 
 

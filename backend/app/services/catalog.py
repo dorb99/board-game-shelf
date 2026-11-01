@@ -66,7 +66,7 @@ def _entries() -> list[Entry]:
     return load(settings.catalog_csv)
 
 
-def _match_quality(key: str, wanted: str) -> int | None:
+def match_quality(key: str, wanted: str) -> int | None:
     """Lower is better; None means the name does not match."""
     if key == wanted:
         return 0
@@ -82,17 +82,25 @@ def _match_quality(key: str, wanted: str) -> int | None:
     return None
 
 
-def search(query: str, entries: list[Entry] | None = None) -> list[Candidate]:
-    """Best name matches: closest match first, then base games, then most-rated."""
+def search(
+    query: str, entries: list[Entry] | None = None, expansions_first: bool = False
+) -> list[Candidate]:
+    """Best name matches: closest match first, then base games, then most-rated.
+
+    With `expansions_first`, every expansion comes before every base game.
+    """
     wanted = normalize(query)
     if not wanted:
         return []
     matches = []
     for entry in entries if entries is not None else _entries():
-        quality = _match_quality(entry.key, wanted)
+        quality = match_quality(entry.key, wanted)
         if quality is not None:
             matches.append((quality, entry.is_expansion, -entry.users_rated, entry))
-    matches.sort(key=lambda match: match[:3])
+    if expansions_first:
+        matches.sort(key=lambda match: (not match[1], match[0], match[2]))
+    else:
+        matches.sort(key=lambda match: match[:3])
     return [
         Candidate(
             source="catalog",

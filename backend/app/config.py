@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-5-mini"
     # Reasoning models only; leave blank for a model that does not take this setting.
     openai_reasoning_effort: str = "low"
+    # BoardGameGeek XML API token; game details come from BGG first when it is set.
+    bgg_api_token: str = ""
     # Postgres connection string for the library: owners, games and cover images.
     database_url: str
     # Where the game catalog file lives.

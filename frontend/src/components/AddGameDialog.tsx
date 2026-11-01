@@ -18,7 +18,7 @@ export function AddGameDialog({ owners, base, onClose }: Props) {
   // An expansion's name usually starts with its base game's, so the search does too.
   const [query, setQuery] = useState(base ? `${base.name} ` : '')
   const [reviewing, setReviewing] = useState<ReviewStart | null>(null)
-  const lookup = useMutation({ mutationFn: api.lookup })
+  const lookup = useMutation({ mutationFn: (name: string) => api.lookup(name, base?.name) })
   const candidates = lookup.data?.candidates ?? []
 
   function search(event: FormEvent) {

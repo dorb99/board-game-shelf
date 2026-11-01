@@ -10,6 +10,7 @@ os.environ["DATABASE_URL"] = (
 os.environ["LLM_PROVIDER"] = "gemini"
 os.environ["GEMINI_API_KEY"] = ""
 os.environ["OPENAI_API_KEY"] = ""
+os.environ["BGG_API_TOKEN"] = ""  # tests never reach the real BoardGameGeek
 
 import pytest
 from fastapi.testclient import TestClient

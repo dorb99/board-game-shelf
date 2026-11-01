@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, type Game, type GameChanges, type Owner } from '../api'
 import { parseCount, toText } from '../fields'
+import { playersLabel, withExpansions } from '../filters'
 import { Modal } from './Modal'
 import { type OwnerChoice, OwnerPicker, toOwnerRef } from './OwnerPicker'
 import { RulesChat } from './RulesChat'
@@ -29,6 +30,7 @@ export function GameDetail({ game, owners, games, onSelect, onAddExpansion, onCl
 
   const base = games.find((other) => other.id === game.parent_id)
   const expansions = games.filter((other) => other.parent_id === game.id)
+  const combinedPlayers = playersLabel(withExpansions(game, expansions))
 
   const refresh = () => queryClient.invalidateQueries()
   const save = useMutation({
@@ -75,9 +77,12 @@ export function GameDetail({ game, owners, games, onSelect, onAddExpansion, onCl
         {game.image_url && !pickingSlice && (
           <>
             <img className="cover" src={game.image_url} alt={`${game.name} box cover`} />
-            <button className="link" onClick={() => setPickingSlice(true)}>
-              Change the part shown on the shelf
-            </button>
+            {/* An expansion has no box of its own on the shelf. */}
+            {!base && (
+              <button className="link" onClick={() => setPickingSlice(true)}>
+                Change the part shown on the shelf
+              </button>
+            )}
           </>
         )}
         {game.image_url && pickingSlice && (
@@ -112,6 +117,10 @@ export function GameDetail({ game, owners, games, onSelect, onAddExpansion, onCl
               />
             </span>
           </label>
+          {expansions.length > 0 && combinedPlayers !== playersLabel(game) && (
+            <p className="hint">With expansions: {combinedPlayers}</p>
+          )}
+          {base && <p className="hint">Players with this expansion added to {base.name}.</p>}
           <label>
             Play time (minutes)
             <input
@@ -175,6 +184,9 @@ export function GameDetail({ game, owners, games, onSelect, onAddExpansion, onCl
                     <button className="link" onClick={() => onSelect(expansion.id)}>
                       {expansion.name}
                     </button>
+                    {playersLabel(expansion) && (
+                      <span className="hint"> · {playersLabel(expansion)}</span>
+                    )}
                   </li>
                 ))}
               </ul>

@@ -42,6 +42,11 @@ def test_catalog_search_orders_by_match_then_base_game_then_popularity(entries):
     ]
 
 
+def test_catalog_search_for_an_expansion_puts_expansions_first(entries):
+    names = [c.name for c in catalog.search("catan", entries, expansions_first=True)]
+    assert names[:2] == ["CATAN: Cities & Knights", "CATAN"]
+
+
 def test_catalog_search_candidate_fields(entries):
     (azul,) = catalog.search("  AZUL ", entries)
     assert (azul.source, azul.bgg_id, azul.year, azul.image_url) == ("catalog", 230802, 2017, None)
@@ -246,6 +251,23 @@ def test_details_use_web_search(monkeypatch):
     assert (found.searched, found.image_url) == (True, "https://example.com/cover.jpg")
 
 
+def test_expansion_details_ask_for_players_with_the_expansion(monkeypatch):
+    provider = use_provider(monkeypatch, FakeProvider(DETAILS_REPLY))
+    prompts = []
+    original = provider.generate_json
+
+    async def record(prompt, *, search):
+        prompts.append(prompt)
+        return await original(prompt, search=search)
+
+    monkeypatch.setattr(provider, "generate_json", record)
+    monkeypatch.setattr(images, "is_image_url", lambda url: asyncio.sleep(0, True))
+    asyncio.run(llm.fetch_details("Seafarers", None, None, expansion_for="Catan"))
+    prompt = " ".join(prompts[0].split())
+    assert '"Seafarers", an expansion for the board game "Catan"' in prompt
+    assert "supports once this expansion is added" in prompt
+
+
 def test_details_fall_back_to_memory_when_search_is_refused(monkeypatch):
     provider = use_provider(monkeypatch, FakeProvider(DETAILS_REPLY, search_allowed=False))
     found = asyncio.run(llm.fetch_details("Wingspan", 2019, 266192))
@@ -278,3 +300,148 @@ def test_rules_prompt_names_the_base_game_and_owned_expansions():
     assert '"Catan"' in context
     assert '"Seafarers", "Cities & Knights"' in context
     assert llm._expansion_context(None, []) == ""
+
+
+THING_XML = """<?xml version="1.0" encoding="utf-8"?>
+<items termsofuse="https://boardgamegeek.com/xmlapi/termsofuse">
+  <item type="boardgame" id="13">
+    <thumbnail>https://cf.geekdo-images.com/catan_thumb.jpg</thumbnail>
+    <image>https://cf.geekdo-images.com/catan.jpg</image>
+    <name type="alternate" sortindex="1" value="Die Siedler von Catan" />
+    <name type="primary" sortindex="1" value="CATAN" />
+    <yearpublished value="1995" />
+    <minplayers value="3" />
+    <maxplayers value="4" />
+    <playingtime value="120" />
+    <minplaytime value="60" />
+    <maxplaytime value="120" />
+  </item>
+  <item type="boardgameexpansion" id="926">
+    <name type="primary" sortindex="1" value="CATAN: Cities &amp; Knights" />
+    <yearpublished value="1998" />
+    <minplayers value="3" />
+    <maxplayers value="4" />
+    <playingtime value="0" />
+    <maxplaytime value="90" />
+    <link type="boardgameexpansion" id="13" value="CATAN" inbound="true" />
+  </item>
+</items>"""
+
+SEARCH_XML = """<?xml version="1.0" encoding="utf-8"?>
+<items total="3" termsofuse="https://boardgamegeek.com/xmlapi/termsofuse">
+  <item type="boardgame" id="926"><name type="primary" value="CATAN: Cities &amp; Knights"/></item>
+  <item type="boardgame" id="99"><name type="alternate" value="Siedler"/></item>
+  <item type="boardgame" id="13"><name type="primary" value="CATAN"/></item>
+  <item type="boardgameexpansion" id="926"><name type="primary" value="CATAN: Cities &amp; Knights"/></item>
+</items>"""
+
+
+@pytest.fixture
+def fake_bgg(monkeypatch):
+    """Answers BGG requests from the canned XML and records each one."""
+    from app.services import bgg
+
+    calls = []
+
+    async def fake_get(path, params):
+        calls.append((path, params))
+        return SEARCH_XML if path == "search" else THING_XML
+
+    monkeypatch.setattr(bgg, "_get", fake_get)
+    monkeypatch.setattr(bgg, "_cache", {})
+    return calls
+
+
+def test_bgg_things_are_parsed():
+    from app.services import bgg
+
+    catan, cities = bgg.parse_things(THING_XML)
+    assert catan == bgg.Thing(
+        bgg_id=13, name="CATAN", year=1995, is_expansion=False, min_players=3, max_players=4,
+        playing_time=120, image_url="https://cf.geekdo-images.com/catan.jpg",
+        thumbnail_url="https://cf.geekdo-images.com/catan_thumb.jpg",
+    )
+    assert cities.is_expansion and cities.name == "CATAN: Cities & Knights"
+    assert cities.playing_time == 90  # 0 means unknown, so the longest play time stands in
+    assert (cities.image_url, cities.thumbnail_url) == (None, None)
+
+
+def test_bgg_details_are_fetched_once_in_batches(fake_bgg):
+    from app.services import bgg
+
+    found = asyncio.run(bgg.things([13, 926, 13]))
+    assert set(found) == {13, 926}
+    assert fake_bgg == [("thing", {"id": "13,926"})]
+    asyncio.run(bgg.things([926, 13]))
+    assert len(fake_bgg) == 1  # cached
+
+
+def test_bgg_enrich_fills_in_catalog_matches(fake_bgg):
+    from app.models import Candidate
+    from app.services import bgg
+
+    matches = [Candidate(source="catalog", bgg_id=13, name="CATAN"),
+               Candidate(source="catalog", bgg_id=5, name="Not on BGG")]
+    catan, other = asyncio.run(bgg.enrich(matches))
+    assert (catan.source, catan.max_players, catan.image_url) == (
+        "bgg", 4, "https://cf.geekdo-images.com/catan.jpg")
+    assert other == matches[1]
+
+
+def test_bgg_search_puts_the_closest_base_game_first(fake_bgg):
+    from app.services import bgg
+
+    found = asyncio.run(bgg.search("catan"))
+    assert [c.bgg_id for c in found] == [13, 926]  # exact name first; 99 is not in the details
+    assert all(c.source == "bgg" for c in found)
+    found = asyncio.run(bgg.search("catan", expansions_first=True))
+    assert [c.bgg_id for c in found] == [926, 13]
+    assert fake_bgg[0] == ("search", {"query": "catan", "type": "boardgame,boardgameexpansion"})
+
+
+def test_bgg_is_retried_while_busy(monkeypatch):
+    import httpx
+
+    from app.config import settings
+    from app.services import bgg
+
+    replies = [httpx.Response(202), httpx.Response(503), httpx.Response(200, text=THING_XML)]
+    sent = []
+
+    def handler(request):
+        sent.append(request)
+        return replies.pop(0)
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx, "AsyncClient",
+        lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw),
+    )
+    monkeypatch.setattr(bgg, "RETRY_DELAYS", (0, 0))
+    monkeypatch.setattr(bgg, "MIN_SPACING", 0)
+    monkeypatch.setattr(settings, "bgg_api_token", "secret")
+    assert asyncio.run(bgg._get("thing", {"id": "13"})) == THING_XML
+    assert len(sent) == 3
+    assert sent[0].headers["Authorization"] == "Bearer secret"
+    assert str(sent[0].url) == "https://boardgamegeek.com/xmlapi2/thing?id=13"
+
+    replies[:] = [httpx.Response(401)]
+    with pytest.raises(bgg.BggError):
+        asyncio.run(bgg._get("thing", {"id": "13"}))
+
+
+def test_details_ask_the_ai_only_for_what_is_wanted(monkeypatch):
+    provider = use_provider(monkeypatch, FakeProvider(DETAILS_REPLY))
+    prompts = []
+    original = provider.generate_json
+
+    async def record(prompt, *, search):
+        prompts.append(prompt)
+        return await original(prompt, search=search)
+
+    monkeypatch.setattr(provider, "generate_json", record)
+    found = asyncio.run(llm.fetch_details("Wingspan", 2019, 266192, wanted=["playing_time"]))
+    assert '{"playing_time": int|null}' in prompts[0]
+    assert "image_urls" not in prompts[0] and "min_players" not in prompts[0]
+    assert (found.playing_time, found.min_players, found.image_url) == (70, None, None)
+    assert found.used_ai

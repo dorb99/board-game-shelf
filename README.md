@@ -29,6 +29,7 @@ Settings in `backend/.env`:
 | `GEMINI_MODEL` | Optional. Defaults to `gemini-flash-latest` |
 | `OPENAI_API_KEY` | Used when the provider is `openai`. Get one at https://platform.openai.com/api-keys |
 | `OPENAI_MODEL` | Optional. Defaults to `gpt-5-mini`; any model that supports the web search tool |
+| `BGG_API_TOKEN` | Optional. BoardGameGeek XML API token: register an application at https://boardgamegeek.com/applications and create a token once BGG approves it. Without it the AI provider finds every detail |
 | `DATABASE_URL` | Postgres connection string for the library: owners, games and cover images. A free database from https://neon.tech works |
 | `DATA_DIR` | Optional. Where the game catalog file lives. Defaults to `backend/data`; a relative path is taken from the project root |
 
@@ -41,8 +42,10 @@ its id, name and year. Download it from https://boardgamegeek.com/data_dumps/bg_
 
 Adding a game works like this:
 
-1. The name is searched in the catalog. A game that is not there is searched on the web by the AI provider.
-2. For the match you pick, the AI provider searches the web for the cover, player count and play time.
+1. The name is searched in the catalog, and the matches get their cover, player count and
+   play time from the BoardGameGeek API. A game that is not in the catalog is searched on
+   BGG, and failing that on the web by the AI provider.
+2. For the match you pick, the AI provider searches the web only for what BGG did not have.
 3. You review and correct everything, then add it.
 
 If the provider refuses web search (for example a Gemini key without billing), it

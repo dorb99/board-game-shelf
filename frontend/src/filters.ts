@@ -42,6 +42,21 @@ export function matchesFilters(game: GameDetails & { owner_id: number }, filters
   return true
 }
 
+/**
+ * A base game's player range once its expansions are added: the widest of them all.
+ * Play time stays the base game's own.
+ */
+export function withExpansions<T extends GameDetails>(game: T, expansions: GameDetails[]): T {
+  const mins = [game, ...expansions]
+    .map((item) => item.min_players ?? item.max_players)
+    .filter((n): n is number => n != null)
+  const maxes = [game, ...expansions]
+    .map((item) => item.max_players ?? item.min_players)
+    .filter((n): n is number => n != null)
+  if (mins.length === 0) return game
+  return { ...game, min_players: Math.min(...mins), max_players: Math.max(...maxes) }
+}
+
 export function playersLabel(game: GameDetails): string | null {
   const min = game.min_players ?? game.max_players
   const max = game.max_players ?? game.min_players

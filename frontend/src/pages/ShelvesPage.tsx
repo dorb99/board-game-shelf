@@ -5,7 +5,7 @@ import { AddGameDialog } from '../components/AddGameDialog'
 import { FilterBar } from '../components/FilterBar'
 import { GameDetail } from '../components/GameDetail'
 import { Shelf } from '../components/Shelf'
-import { type Filters, matchesFilters, NO_FILTERS } from '../filters'
+import { type Filters, matchesFilters, NO_FILTERS, withExpansions } from '../filters'
 
 export function ShelvesPage() {
   const owners = useQuery({ queryKey: ['owners'], queryFn: api.owners })
@@ -17,7 +17,13 @@ export function ShelvesPage() {
 
   const allOwners = owners.data ?? []
   const allGames = games.data ?? []
-  const visible = allGames.filter((game) => matchesFilters(game, filters))
+  const expansionsOf = (game: Game) => allGames.filter((other) => other.parent_id === game.id)
+  // Expansions live inside their base game's box, and widen its player range.
+  const baseGames = allGames
+    .filter((game) => game.parent_id == null)
+    .map((game) => withExpansions(game, expansionsOf(game)))
+  const expansionCounts = new Map(baseGames.map((game) => [game.id, expansionsOf(game).length]))
+  const visible = baseGames.filter((game) => matchesFilters(game, filters))
   const shelves = allOwners
     .map((owner) => ({ owner, games: visible.filter((game) => game.owner_id === owner.id) }))
     .filter((shelf) => shelf.games.length > 0)
@@ -52,7 +58,13 @@ export function ShelvesPage() {
           </p>
         )}
         {shelves.map(({ owner, games }) => (
-          <Shelf key={owner.id} owner={owner} games={games} onSelect={setSelectedId} />
+          <Shelf
+            key={owner.id}
+            owner={owner}
+            games={games}
+            expansionCounts={expansionCounts}
+            onSelect={setSelectedId}
+          />
         ))}
       </main>
 

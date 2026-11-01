@@ -20,14 +20,21 @@ interface Props {
 
 const SOURCE_NOTE = {
   catalog: 'Matched in the BoardGameGeek catalog; the cover and details come from an AI web search.',
+  bgg: 'Found on BoardGameGeek; anything it lacks comes from an AI web search.',
   web: 'Not in the catalog, so everything here comes from an AI web search.',
   manual: 'Entered by hand.',
 }
 
-/** The fields the AI lookup can fill in. */
+/** The fields the lookup can fill in. */
 const FOUND_KEYS = ['min_players', 'max_players', 'playing_time', 'image_url'] as const
+const DETAIL_KEYS = ['min_players', 'max_players', 'playing_time'] as const
 
-function initialFields(start: ReviewStart) {
+/** The cover a lookup match came with, if any. */
+function foundCover(start: ReviewStart): string {
+  return start.source === 'manual' ? '' : (start.image_url ?? '')
+}
+
+function initialFields(start: ReviewStart, withCover: boolean) {
   const found = start.source === 'manual' ? null : start
   return {
     name: start.name,
@@ -35,14 +42,16 @@ function initialFields(start: ReviewStart) {
     min_players: toText(found?.min_players ?? null),
     max_players: toText(found?.max_players ?? null),
     playing_time: toText(found?.playing_time ?? null),
-    image_url: found?.image_url ?? '',
+    image_url: withCover ? foundCover(start) : '',
   }
 }
 
 /** Shows everything the lookup found so it can be checked and corrected before adding. */
 export function ReviewGame({ start, owners, base, onBack, onAdded }: Props) {
   const queryClient = useQueryClient()
-  const [fields, setFields] = useState(() => initialFields(start))
+  // An expansion's cover is optional: it is only asked for once the user wants one.
+  const [wantsCover, setWantsCover] = useState(!base)
+  const [fields, setFields] = useState(() => initialFields(start, !base))
   const [imageBroken, setImageBroken] = useState(false)
   const [slice, setSlice] = useState(DEFAULT_SLICE)
   const [showLabel, setShowLabel] = useState(true)
@@ -52,15 +61,22 @@ export function ReviewGame({ start, owners, base, onBack, onAdded }: Props) {
   })
   const set = (changes: Partial<typeof fields>) => setFields((current) => ({ ...current, ...changes }))
 
-  // The AI lookup fills in only the fields that are still blank.
-  const bggId = start.source === 'catalog' ? start.bgg_id : null
+  // The lookup asks for, and fills in, only the fields that are still blank.
+  const lookupKeys = wantsCover ? FOUND_KEYS : DETAIL_KEYS
+  const bggId = start.source === 'manual' ? null : start.bgg_id
   const details = useMutation({
     mutationFn: () =>
-      api.lookupDetails(fields.name.trim(), parseCount(fields.year) ?? null, bggId),
+      api.lookupDetails(
+        fields.name.trim(),
+        parseCount(fields.year) ?? null,
+        bggId,
+        base?.name,
+        lookupKeys.filter((key) => !fields[key].trim()),
+      ),
     onSuccess: (found) =>
       setFields((current) => {
         const filled = { ...current }
-        for (const key of FOUND_KEYS) {
+        for (const key of lookupKeys) {
           if (!filled[key].trim()) filled[key] = String(found[key] ?? '')
         }
         return filled
@@ -74,14 +90,20 @@ export function ReviewGame({ start, owners, base, onBack, onAdded }: Props) {
     },
   })
 
-  const missing = FOUND_KEYS.some((key) => !fields[key].trim())
+  const missing = lookupKeys.some((key) => !fields[key].trim())
   const lookUpDetails = details.mutate
   const lookedUp = useRef(false)
   useEffect(() => {
     if (lookedUp.current) return
     lookedUp.current = true
-    if (FOUND_KEYS.some((key) => !initialFields(start)[key])) lookUpDetails()
-  }, [start, lookUpDetails])
+    const initial = initialFields(start, !base)
+    if ((base ? DETAIL_KEYS : FOUND_KEYS).some((key) => !initial[key])) lookUpDetails()
+  }, [start, base, lookUpDetails])
+
+  function addCover() {
+    setWantsCover(true)
+    set({ image_url: details.data?.image_url ?? foundCover(start) })
+  }
 
   const name = fields.name.trim()
   const numbers = {
@@ -111,7 +133,7 @@ export function ReviewGame({ start, owners, base, onBack, onAdded }: Props) {
       ...(numbers as Record<keyof typeof numbers, number | null>),
       name,
       bgg_id: bggId,
-      image_url: fields.image_url.trim() || null,
+      image_url: (wantsCover && fields.image_url.trim()) || null,
       spine_position: slice,
       spine_label: showLabel,
     }
@@ -124,7 +146,23 @@ export function ReviewGame({ start, owners, base, onBack, onAdded }: Props) {
 
       <div className="review-body">
         <div className="review-cover">
-          {fields.image_url.trim() && !imageBroken ? (
+          {!wantsCover ? (
+            <span className="no-cover">
+              <button className="link" onClick={addCover}>
+                Add a cover image
+              </button>
+              (optional)
+            </span>
+          ) : /* An expansion has no box of its own on the shelf, so no strip to pick. */
+          base && fields.image_url.trim() && !imageBroken ? (
+            <img
+              className="cover"
+              src={fields.image_url.trim()}
+              alt={`${name} box cover`}
+              referrerPolicy="no-referrer"
+              onError={() => setImageBroken(true)}
+            />
+          ) : fields.image_url.trim() && !imageBroken ? (
             <SlicePicker
               imageUrl={fields.image_url.trim()}
               name={name || 'Game name'}
@@ -187,8 +225,16 @@ export function ReviewGame({ start, owners, base, onBack, onAdded }: Props) {
               />
             </label>
           </div>
+          {base && (
+            <p className="hint">
+              Players and minutes are for {base.name} played with this expansion; the players
+              widen {base.name}'s range on the shelf.
+            </p>
+          )}
           {details.isPending && (
-            <p className="hint">Searching the web for the cover and details…</p>
+            <p className="hint">
+              Looking up the {wantsCover ? 'cover and details' : 'details'}…
+            </p>
           )}
           {details.error && <p className="hint">{details.error.message}</p>}
           {details.data?.searched === false && (
@@ -209,18 +255,20 @@ export function ReviewGame({ start, owners, base, onBack, onAdded }: Props) {
         </div>
       </div>
 
-      <label>
-        Cover image link
-        <input
-          maxLength={2000}
-          placeholder="https://…"
-          value={fields.image_url}
-          onChange={(event) => {
-            setImageBroken(false)
-            set({ image_url: event.target.value })
-          }}
-        />
-      </label>
+      {wantsCover && (
+        <label>
+          Cover image link
+          <input
+            maxLength={2000}
+            placeholder="https://…"
+            value={fields.image_url}
+            onChange={(event) => {
+              setImageBroken(false)
+              set({ image_url: event.target.value })
+            }}
+          />
+        </label>
+      )}
 
       {problem && <p className="notice error">{problem}</p>}
       {save.error && <p className="notice error">{save.error.message}</p>}
@@ -232,7 +280,7 @@ export function ReviewGame({ start, owners, base, onBack, onAdded }: Props) {
         {base ? (
           <span className="hint">
             Expansion for {base.name}
-            {baseOwner && `, on ${baseOwner.name}'s shelf`}
+            {baseOwner && ` (${baseOwner.name})`}
           </span>
         ) : (
           <OwnerPicker owners={owners} value={owner} onChange={setOwner} />
@@ -242,7 +290,7 @@ export function ReviewGame({ start, owners, base, onBack, onAdded }: Props) {
           disabled={problem != null || !ownerRef || save.isPending || details.isPending}
           onClick={add}
         >
-          {save.isPending ? 'Adding…' : 'Add to shelf'}
+          {save.isPending ? 'Adding…' : base ? 'Add expansion' : 'Add to shelf'}
         </button>
       </div>
     </div>

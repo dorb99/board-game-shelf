@@ -24,7 +24,8 @@ export interface Game extends GameDetails {
 }
 
 export interface Candidate extends GameDetails {
-  source: 'catalog' | 'web'
+  /** catalog: name match only; bgg: details from the BGG API; web: found by the AI */
+  source: 'catalog' | 'bgg' | 'web'
   bgg_id: number | null
   name: string
   year: number | null
@@ -33,11 +34,16 @@ export interface Candidate extends GameDetails {
   image_url: string | null
 }
 
-/** What the AI found online for one game; unknown values are null. */
+/** The details the lookup can fill in. */
+export type DetailKey = 'min_players' | 'max_players' | 'playing_time' | 'image_url'
+
+/** What BGG and the AI found for one game; unknown values are null. */
 export interface FoundDetails extends GameDetails {
   image_url: string | null
   /** False when web search was refused and the AI answered from memory. */
   searched: boolean
+  /** True when the AI was asked for anything BGG did not have. */
+  used_ai: boolean
 }
 
 export interface LookupResult {
@@ -107,12 +113,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   owners: () => request<Owner[]>('/api/owners'),
   games: () => request<Game[]>('/api/games'),
-  lookup: (query: string) =>
-    request<LookupResult>(`/api/lookup?q=${encodeURIComponent(query)}`),
-  lookupDetails: (name: string, year: number | null, bggId: number | null) => {
+  /** `expansionFor` names the base game when looking for one of its expansions. */
+  lookup: (query: string, expansionFor?: string) => {
+    const params = new URLSearchParams({ q: query })
+    if (expansionFor) params.set('expansion_for', expansionFor)
+    return request<LookupResult>(`/api/lookup?${params}`)
+  },
+  lookupDetails: (
+    name: string,
+    year: number | null,
+    bggId: number | null,
+    expansionFor: string | undefined,
+    want: readonly DetailKey[],
+  ) => {
     const params = new URLSearchParams({ name })
+    for (const key of want) params.append('want', key)
     if (year) params.set('year', String(year))
     if (bggId) params.set('bgg_id', String(bggId))
+    if (expansionFor) params.set('expansion_for', expansionFor)
     return request<FoundDetails>(`/api/lookup/details?${params}`)
   },
   addGame: (game: NewGame) =>

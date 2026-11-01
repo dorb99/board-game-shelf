@@ -24,11 +24,16 @@ export function sliceBackground(imageUrl: string | null, position: number | null
   }
 }
 
-export function Spine({ game, onClick }: { game: Game; onClick: () => void }) {
+interface Props {
+  game: Game
+  /** How many expansions are kept in this box; shown as a small mark. */
+  expansions?: number
+  onClick: () => void
+}
+
+export function Spine({ game, expansions = 0, onClick }: Props) {
   const h = hash(game.id)
-  const expansion = game.parent_id != null
-  // Expansion boxes are slimmer and pile up right under their base game.
-  const height = expansion ? 30 : 40 + ((h >>> 4) % 3) * 5
+  const height = 40 + ((h >>> 4) % 3) * 5
   const style = {
     width: Math.round(height * SPINE_ASPECT) + (h % 3) * 12,
     height,
@@ -37,17 +42,25 @@ export function Spine({ game, onClick }: { game: Game; onClick: () => void }) {
   }
   // A box without a cover always needs its name; otherwise the label is optional.
   const showLabel = game.spine_label || !game.image_url
+  const withExpansions = expansions
+    ? `with ${expansions === 1 ? '1 expansion' : `${expansions} expansions`}`
+    : null
   return (
     <button
-      className={expansion ? 'spine expansion' : 'spine'}
+      className="spine"
       style={style}
-      title={expansion ? `${game.name} (expansion)` : game.name}
+      title={withExpansions ? `${game.name} (${withExpansions})` : game.name}
       onClick={onClick}
     >
       {showLabel ? (
         <span className="spine-title">{game.name}</span>
       ) : (
         <span className="visually-hidden">{game.name}</span>
+      )}
+      {withExpansions && (
+        <span className="spine-expansions" aria-label={withExpansions}>
+          +{expansions}
+        </span>
       )}
     </button>
   )

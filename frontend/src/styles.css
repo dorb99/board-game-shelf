@@ -265,13 +265,18 @@ button.spine:focus-visible {
   z-index: 1;
 }
 
-/* An expansion: a slimmer box with a gold edge, piled under its base game. */
-.spine.expansion {
-  border-left: 5px solid #d9a74a;
-}
-
-.spine.expansion .spine-title {
-  font-size: 0.75rem;
+/* How many expansions are kept in the box. */
+.spine-expansions {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  padding: 1px 6px;
+  background: #d9a74a;
+  border-radius: 8px;
+  color: #261c15;
+  font-size: 0.7rem;
+  font-weight: 700;
+  transform: translateY(-50%);
 }
 
 .spine-title {
@@ -439,6 +444,8 @@ button.spine:focus-visible {
 .no-cover {
   display: grid;
   place-items: center;
+  align-content: center;
+  gap: 4px;
   padding: 8px;
   color: var(--muted);
   font-size: 0.8rem;
@@ -594,7 +601,11 @@ button.spine:focus-visible {
 }
 
 .expansions ul {
-  display: contents;
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
   list-style: none;
 }
 
